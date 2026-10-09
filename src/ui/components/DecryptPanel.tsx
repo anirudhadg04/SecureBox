@@ -1,8 +1,7 @@
 import React, { useRef, useState } from 'react';
-import { Unlock, Download, RotateCcw, KeyRound, Upload } from 'lucide-react';
-import { decryptDocument } from '../../core/crypto/service';
+import { Unlock, Download, RotateCcw, KeyRound, Upload, FileText, CheckCircle2 } from 'lucide-react';
+import { decryptAnyDocument, DecryptAnyResult } from '../../core/crypto/service';
 import { parseKeyFromInput } from '../../core/crypto/keyUtils';
-import { SboxMetadata } from '../../core/crypto/types';
 import { FileDropzone, formatFileSize } from './common/FileDropzone';
 import { Banner } from './common/Banner';
 
@@ -12,8 +11,8 @@ export const DecryptPanel: React.FC = () => {
   const [status, setStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const [decryptedBlobUrl, setDecryptedBlobUrl] = useState<string | null>(null);
-  const [restoredMetadata, setRestoredMetadata] = useState<SboxMetadata | null>(null);
+  const [decryptedResult, setDecryptedResult] = useState<DecryptAnyResult | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
 
   const keyFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -42,19 +41,17 @@ export const DecryptPanel: React.FC = () => {
       const buffer = await file.arrayBuffer();
       const sboxBytes = new Uint8Array(buffer);
 
-      // 3. Authenticated decryption
-      const { plaintext, metadata } = await decryptDocument(sboxBytes, key);
+      // 3. Authenticated decryption (handles both single-file v1 and archive v2)
+      const result = await decryptAnyDocument(sboxBytes, key);
 
-      // 4. Create downloadable Blob for restored original file
-      const blob = new Blob([plaintext as unknown as BlobPart], { type: metadata.mimeType || 'application/octet-stream' });
-      const url = URL.createObjectURL(blob);
+      // 4. Create object URL for download
+      const url = URL.createObjectURL(result.downloadBlob);
 
-      setDecryptedBlobUrl(url);
-      setRestoredMetadata(metadata);
+      setDecryptedResult(result);
+      setDownloadUrl(url);
       setStatus('success');
     } catch (err) {
       setStatus('error');
-      // Generic, safe error reporting that does not leak internal buffers
       setErrorMessage(
         err instanceof Error ? err.message : 'Decryption failed: invalid key or corrupted file'
       );
@@ -62,23 +59,23 @@ export const DecryptPanel: React.FC = () => {
   };
 
   const handleReset = () => {
-    if (decryptedBlobUrl) {
-      URL.revokeObjectURL(decryptedBlobUrl);
+    if (downloadUrl) {
+      URL.revokeObjectURL(downloadUrl);
     }
     setFile(null);
     setKeyInput('');
     setStatus('idle');
     setErrorMessage(null);
-    setDecryptedBlobUrl(null);
-    setRestoredMetadata(null);
+    setDecryptedResult(null);
+    setDownloadUrl(null);
   };
 
   return (
     <div className="panel-card">
       <div className="panel-header">
-        <h2 className="panel-title">Decrypt Document</h2>
+        <h2 className="panel-title">Decrypt Document or Archive</h2>
         <p className="panel-subtitle">
-          Decrypt and authenticate your <code>.sbox</code> file locally with your 256-bit key.
+          Decrypt single files or multi-file archives locally with your 256-bit key.
         </p>
       </div>
 
@@ -96,7 +93,7 @@ export const DecryptPanel: React.FC = () => {
             onClear={() => setFile(null)}
             accept=".sbox"
             label="Select .sbox file"
-            hint="Choose the encrypted SecureBox (.sbox) container"
+            hint="Choose an encrypted SecureBox (.sbox) document or archive"
             disabled={status === 'processing'}
           />
 
@@ -149,44 +146,134 @@ export const DecryptPanel: React.FC = () => {
               disabled={!file || !keyInput.trim() || status === 'processing'}
             >
               <Unlock size={18} aria-hidden="true" />
-              <span>{status === 'processing' ? 'Decrypting document...' : 'Decrypt File'}</span>
+              <span>{status === 'processing' ? 'Decrypting payload...' : 'Decrypt File / Archive'}</span>
             </button>
           </div>
         </div>
       ) : (
         <div>
-          <Banner variant="success" title="File Authenticated and Decrypted">
-            Document integrity and authentication tag verified. The original file has been restored.
-          </Banner>
+          {decryptedResult?.type === 'single' ? (
+            <div>
+              <Banner variant="success" title="File Authenticated and Decrypted">
+                Single-file document integrity and authentication tag verified.
+              </Banner>
 
-          {restoredMetadata && (
-            <div className="selected-file-badge" style={{ margin: '20px 0' }}>
-              <div className="selected-file-info">
-                <KeyRound size={24} aria-hidden="true" />
-                <div>
-                  <div className="selected-file-name">{restoredMetadata.originalName}</div>
-                  <div className="selected-file-meta">
-                    Restored size: {formatFileSize(restoredMetadata.size)} • Type:{' '}
-                    {restoredMetadata.mimeType || 'Binary'}
+              <div className="selected-file-badge" style={{ margin: '20px 0' }}>
+                <div className="selected-file-info">
+                  <KeyRound size={24} aria-hidden="true" />
+                  <div>
+                    <div className="selected-file-name">{decryptedResult.metadata.originalName}</div>
+                    <div className="selected-file-meta">
+                      Restored size: {formatFileSize(decryptedResult.metadata.size)} • Type:{' '}
+                      {decryptedResult.metadata.mimeType || 'Binary'}
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          )}
 
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', margin: '20px 0' }}>
-            {decryptedBlobUrl && restoredMetadata && (
-              <a
-                href={decryptedBlobUrl}
-                download={restoredMetadata.originalName}
-                className="btn btn-primary"
-                role="button"
-              >
-                <Download size={18} aria-hidden="true" />
-                <span>Download Restored File ({restoredMetadata.originalName})</span>
-              </a>
-            )}
-          </div>
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', margin: '20px 0' }}>
+                {downloadUrl && (
+                  <a
+                    href={downloadUrl}
+                    download={decryptedResult.downloadFilename}
+                    className="btn btn-primary"
+                    role="button"
+                  >
+                    <Download size={18} aria-hidden="true" />
+                    <span>Download Restored File ({decryptedResult.downloadFilename})</span>
+                  </a>
+                )}
+              </div>
+            </div>
+          ) : decryptedResult?.type === 'archive' ? (
+            <div>
+              <Banner variant="success" title="Archive Authenticated and Decrypted">
+                Collection integrity and manifest verified. Recovered <strong>{decryptedResult.files.length} files</strong>{' '}
+                ({formatFileSize(decryptedResult.manifest.totalPlaintextSize)}).
+              </Banner>
+
+              <div style={{ margin: '20px 0' }}>
+                <div style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: '8px' }}>
+                  Recovered Files ({decryptedResult.files.length}):
+                </div>
+                <div
+                  style={{
+                    maxHeight: '220px',
+                    overflowY: 'auto',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-md)',
+                  }}
+                  role="region"
+                  aria-label="List of recovered files"
+                >
+                  {decryptedResult.files.map((rf, idx) => (
+                    <div
+                      key={`${rf.path}-${idx}`}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '8px 12px',
+                        borderBottom: idx < decryptedResult.files.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+                        backgroundColor: idx % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-subtle)',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                        <FileText size={16} aria-hidden="true" style={{ flexShrink: 0 }} />
+                        <span
+                          style={{
+                            fontSize: '0.875rem',
+                            fontWeight: 500,
+                            textOverflow: 'ellipsis',
+                            overflow: 'hidden',
+                            whiteSpace: 'nowrap',
+                          }}
+                          title={rf.path}
+                        >
+                          {rf.path}
+                        </span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', flexShrink: 0 }}>
+                          ({formatFileSize(rf.data.byteLength)})
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          fontSize: '0.75rem',
+                          color: 'var(--state-success-text)',
+                          fontWeight: 500,
+                          flexShrink: 0,
+                        }}
+                      >
+                        <CheckCircle2 size={12} aria-hidden="true" />
+                        <span>Verified</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', margin: '20px 0' }}>
+                {downloadUrl && (
+                  <a
+                    href={downloadUrl}
+                    download={decryptedResult.downloadFilename}
+                    className="btn btn-primary"
+                    role="button"
+                  >
+                    <Download size={18} aria-hidden="true" />
+                    <span>Download Restored ZIP ({decryptedResult.downloadFilename})</span>
+                  </a>
+                )}
+              </div>
+
+              <Banner variant="info" title="Folder Extraction">
+                The downloaded ZIP file extracts into a dedicated folder containing all original files and directory hierarchies.
+              </Banner>
+            </div>
+          ) : null}
 
           <div style={{ marginTop: '24px', borderTop: '1px solid var(--border-subtle)', paddingTop: '16px' }}>
             <button
@@ -195,7 +282,7 @@ export const DecryptPanel: React.FC = () => {
               onClick={handleReset}
             >
               <RotateCcw size={16} aria-hidden="true" />
-              <span>Decrypt Another Document</span>
+              <span>Decrypt Another File or Archive</span>
             </button>
           </div>
         </div>

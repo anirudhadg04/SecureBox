@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { Lock, Download, Copy, Check, ShieldAlert, RotateCcw } from 'lucide-react';
+import { Lock, Download, Copy, Check, ShieldAlert, RotateCcw, X, File as FileIcon } from 'lucide-react';
 import { encryptDocument } from '../../core/crypto/service';
+import { encryptArchive } from '../../core/archive/archiveService';
 import { exportKeyBackup, exportKeyToHex } from '../../core/crypto/keyUtils';
-import { FileDropzone } from './common/FileDropzone';
+import { FileDropzone, formatFileSize } from './common/FileDropzone';
 import { Banner } from './common/Banner';
 
 export const EncryptPanel: React.FC = () => {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [archiveName, setArchiveName] = useState<string>('securebox-archive');
   const [status, setStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -15,36 +17,83 @@ export const EncryptPanel: React.FC = () => {
   const [keyHex, setKeyHex] = useState<string>('');
   const [keyBackupJson, setKeyBackupJson] = useState<string>('');
   const [copiedKey, setCopiedKey] = useState<boolean>(false);
+  const [encryptedSummary, setEncryptedSummary] = useState<{ fileCount: number; totalSize: number } | null>(null);
+
+  const handleFilesSelect = (newFiles: File[]) => {
+    setFiles((prev) => [...prev, ...newFiles]);
+  };
+
+  const handleRemoveFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleClearAll = () => {
+    setFiles([]);
+  };
+
+  const totalSize = files.reduce((acc, f) => acc + f.size, 0);
 
   const handleEncrypt = async () => {
-    if (!file || status === 'processing') return;
+    if (files.length === 0 || status === 'processing') return;
 
     setStatus('processing');
     setErrorMessage(null);
 
     try {
-      const buffer = await file.arrayBuffer();
-      const fileBytes = new Uint8Array(buffer);
+      if (files.length === 1) {
+        // Single file encryption (Envelope v1)
+        const file = files[0];
+        const buffer = await file.arrayBuffer();
+        const fileBytes = new Uint8Array(buffer);
 
-      const result = await encryptDocument(fileBytes, {
-        originalName: file.name,
-        mimeType: file.type || 'application/octet-stream',
-        size: file.size,
-      });
+        const result = await encryptDocument(fileBytes, {
+          originalName: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          size: file.size,
+        });
 
-      // Export key representations
-      const hex = await exportKeyToHex(result.key);
-      const backup = await exportKeyBackup(result.key);
+        const hex = await exportKeyToHex(result.key);
+        const backup = await exportKeyBackup(result.key);
 
-      // Create downloadable .sbox blob
-      const sboxBlob = new Blob([result.sboxBytes as unknown as BlobPart], { type: 'application/octet-stream' });
-      const url = URL.createObjectURL(sboxBlob);
+        const sboxBlob = new Blob([result.sboxBytes as unknown as BlobPart], {
+          type: 'application/octet-stream',
+        });
+        const url = URL.createObjectURL(sboxBlob);
 
-      setEncryptedBlobUrl(url);
-      setDownloadFilename(`${file.name}.sbox`);
-      setKeyHex(hex);
-      setKeyBackupJson(JSON.stringify(backup, null, 2));
-      setStatus('success');
+        setEncryptedBlobUrl(url);
+        setDownloadFilename(`${file.name}.sbox`);
+        setKeyHex(hex);
+        setKeyBackupJson(JSON.stringify(backup, null, 2));
+        setEncryptedSummary({ fileCount: 1, totalSize: file.size });
+        setStatus('success');
+      } else {
+        // Multi-file collection encryption (Envelope v2)
+        const inputFiles = await Promise.all(
+          files.map(async (file) => ({
+            path: file.name,
+            data: new Uint8Array(await file.arrayBuffer()),
+            mimeType: file.type || 'application/octet-stream',
+          }))
+        );
+
+        const safeArchiveName = archiveName.trim() || 'securebox-archive';
+        const result = await encryptArchive(inputFiles, safeArchiveName);
+
+        const hex = await exportKeyToHex(result.key);
+        const backup = await exportKeyBackup(result.key);
+
+        const sboxBlob = new Blob([result.sboxBytes as unknown as BlobPart], {
+          type: 'application/octet-stream',
+        });
+        const url = URL.createObjectURL(sboxBlob);
+
+        setEncryptedBlobUrl(url);
+        setDownloadFilename(`${safeArchiveName}.sbox`);
+        setKeyHex(hex);
+        setKeyBackupJson(JSON.stringify(backup, null, 2));
+        setEncryptedSummary({ fileCount: files.length, totalSize });
+        setStatus('success');
+      }
     } catch (err) {
       setStatus('error');
       setErrorMessage(err instanceof Error ? err.message : 'An error occurred during encryption.');
@@ -58,18 +107,18 @@ export const EncryptPanel: React.FC = () => {
       setCopiedKey(true);
       setTimeout(() => setCopiedKey(false), 2500);
     } catch {
-      // Fallback
       setCopiedKey(false);
     }
   };
 
   const handleDownloadKeyFile = () => {
-    if (!keyBackupJson || !file) return;
+    if (!keyBackupJson) return;
     const blob = new Blob([keyBackupJson], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${file.name}.key`;
+    const keyFileName = downloadFilename ? `${downloadFilename.replace(/\.sbox$/i, '')}.key` : 'securebox.key';
+    a.download = keyFileName;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -80,7 +129,8 @@ export const EncryptPanel: React.FC = () => {
     if (encryptedBlobUrl) {
       URL.revokeObjectURL(encryptedBlobUrl);
     }
-    setFile(null);
+    setFiles([]);
+    setArchiveName('securebox-archive');
     setStatus('idle');
     setErrorMessage(null);
     setEncryptedBlobUrl(null);
@@ -88,50 +138,177 @@ export const EncryptPanel: React.FC = () => {
     setKeyHex('');
     setKeyBackupJson('');
     setCopiedKey(false);
+    setEncryptedSummary(null);
   };
 
   return (
     <div className="panel-card">
       <div className="panel-header">
-        <h2 className="panel-title">Encrypt Document</h2>
+        <h2 className="panel-title">Encrypt Document or Collection</h2>
         <p className="panel-subtitle">
-          Encrypt your file locally with AES-256-GCM. Plaintext never leaves your browser.
+          Encrypt single or multiple files into a tamper-proof <code>.sbox</code> container using AES-256-GCM.
         </p>
       </div>
 
       {status === 'error' && (
         <Banner variant="error" title="Encryption Failed">
-          {errorMessage || 'Unable to encrypt document. Please verify the file and try again.'}
+          {errorMessage || 'Unable to encrypt files. Please verify selection and try again.'}
         </Banner>
       )}
 
       {status !== 'success' ? (
         <div>
           <FileDropzone
-            onFileSelect={(selected) => setFile(selected)}
-            selectedFile={file}
-            onClear={() => setFile(null)}
-            label="Select file to encrypt"
-            hint="Any document, image, or file type (processed 100% locally in browser)"
+            onFilesSelect={handleFilesSelect}
+            multiple={true}
+            label="Select file(s) to encrypt"
+            hint="Drag & drop single or multiple files, or click to browse (100% client-side)"
             disabled={status === 'processing'}
           />
 
-          <div style={{ marginTop: '20px' }}>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={handleEncrypt}
-              disabled={!file || status === 'processing'}
-            >
-              <Lock size={18} aria-hidden="true" />
-              <span>{status === 'processing' ? 'Encrypting file...' : 'Encrypt File'}</span>
-            </button>
-          </div>
+          {files.length > 0 && (
+            <div style={{ marginTop: '20px' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '12px',
+                  paddingBottom: '8px',
+                  borderBottom: '1px solid var(--border-subtle)',
+                }}
+              >
+                <div>
+                  <strong>{files.length} {files.length === 1 ? 'file' : 'files'} selected</strong>
+                  <span style={{ color: 'var(--text-muted)', marginLeft: '8px', fontSize: '0.875rem' }}>
+                    (Total: {formatFileSize(totalSize)})
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleClearAll}
+                    disabled={status === 'processing'}
+                  >
+                    Clear All
+                  </button>
+                </div>
+              </div>
+
+              {files.length > 1 && (
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+                  <label className="form-label" htmlFor="archive-name-input">
+                    Archive Name
+                  </label>
+                  <input
+                    id="archive-name-input"
+                    type="text"
+                    className="form-input"
+                    value={archiveName}
+                    onChange={(e) => setArchiveName(e.target.value)}
+                    placeholder="securebox-archive"
+                    disabled={status === 'processing'}
+                  />
+                  <p className="form-help">
+                    The collection will be encrypted into <code>{archiveName || 'securebox-archive'}.sbox</code>.
+                  </p>
+                </div>
+              )}
+
+              {/* Selected Files List */}
+              <div
+                style={{
+                  maxHeight: '220px',
+                  overflowY: 'auto',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)',
+                  marginBottom: '16px',
+                }}
+                role="region"
+                aria-label="List of selected files"
+              >
+                {files.map((f, idx) => (
+                  <div
+                    key={`${f.name}-${idx}`}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '8px 12px',
+                      borderBottom: idx < files.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+                      backgroundColor: idx % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-subtle)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                      <FileIcon size={16} aria-hidden="true" style={{ flexShrink: 0 }} />
+                      <span
+                        style={{
+                          fontSize: '0.875rem',
+                          fontWeight: 500,
+                          textOverflow: 'ellipsis',
+                          overflow: 'hidden',
+                          whiteSpace: 'nowrap',
+                        }}
+                        title={f.name}
+                      >
+                        {f.name}
+                      </span>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', flexShrink: 0 }}>
+                        ({formatFileSize(f.size)})
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleRemoveFile(idx)}
+                      disabled={status === 'processing'}
+                      aria-label={`Remove ${f.name}`}
+                      style={{ padding: '2px 6px', height: '24px' }}
+                    >
+                      <X size={14} aria-hidden="true" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {totalSize > 250 * 1024 * 1024 && (
+                <Banner variant="warning" title="Memory Warning">
+                  Total file size ({formatFileSize(totalSize)}) exceeds 250 MB. Processing large files in browser memory may cause performance degradation or tab memory limits.
+                </Banner>
+              )}
+
+              <div style={{ marginTop: '16px' }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleEncrypt}
+                  disabled={files.length === 0 || status === 'processing'}
+                >
+                  <Lock size={18} aria-hidden="true" />
+                  <span>
+                    {status === 'processing'
+                      ? 'Encrypting payload...'
+                      : files.length > 1
+                      ? `Encrypt Collection (${files.length} files)`
+                      : 'Encrypt File'}
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div>
-          <Banner variant="success" title="File Encrypted Successfully">
-            Your document has been packaged into an authenticated <code>.sbox</code> container.
+          <Banner variant="success" title="Encryption Complete">
+            {encryptedSummary && encryptedSummary.fileCount > 1 ? (
+              <div>
+                Collection containing <strong>{encryptedSummary.fileCount} files</strong> ({formatFileSize(encryptedSummary.totalSize)})
+                was packaged into an authenticated <code>.sbox</code> archive.
+              </div>
+            ) : (
+              <div>Your document was securely packaged into an authenticated <code>.sbox</code> container.</div>
+            )}
           </Banner>
 
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', margin: '20px 0' }}>
@@ -202,7 +379,7 @@ export const EncryptPanel: React.FC = () => {
               onClick={handleReset}
             >
               <RotateCcw size={16} aria-hidden="true" />
-              <span>Encrypt Another Document</span>
+              <span>Encrypt Another File or Collection</span>
             </button>
           </div>
         </div>

@@ -2,10 +2,12 @@ import React, { useRef, useState } from 'react';
 import { Upload, File as FileIcon, X } from 'lucide-react';
 
 interface FileDropzoneProps {
-  onFileSelect: (file: File) => void;
-  selectedFile: File | null;
-  onClear: () => void;
+  onFileSelect?: (file: File) => void;
+  onFilesSelect?: (files: File[]) => void;
+  selectedFile?: File | null;
+  onClear?: () => void;
   accept?: string;
+  multiple?: boolean;
   label?: string;
   hint?: string;
   disabled?: boolean;
@@ -20,11 +22,13 @@ export function formatFileSize(bytes: number): string {
 
 export const FileDropzone: React.FC<FileDropzoneProps> = ({
   onFileSelect,
+  onFilesSelect,
   selectedFile,
   onClear,
   accept,
-  label = 'Select a document',
-  hint = 'Drag & drop a file here, or click to browse',
+  multiple = false,
+  label = 'Select document(s)',
+  hint = 'Drag & drop file(s) here, or click to browse',
   disabled = false,
 }) => {
   const [isDragActive, setIsDragActive] = useState(false);
@@ -47,20 +51,33 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({
     e.stopPropagation();
   };
 
+  const processFiles = (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+
+    if (multiple && onFilesSelect) {
+      onFilesSelect(files);
+    } else if (onFilesSelect) {
+      onFilesSelect(files);
+    } else if (onFileSelect) {
+      onFileSelect(files[0]);
+    }
+  };
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragActive(false);
 
     if (disabled) return;
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      onFileSelect(e.dataTransfer.files[0]);
-    }
+    processFiles(e.dataTransfer.files);
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      onFileSelect(e.target.files[0]);
+    processFiles(e.target.files);
+    // Reset input value so re-selecting same file triggers event
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
@@ -83,6 +100,7 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({
         ref={fileInputRef}
         type="file"
         accept={accept}
+        multiple={multiple}
         onChange={handleInputChange}
         style={{ display: 'none' }}
         tabIndex={-1}
@@ -124,16 +142,18 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({
               </div>
             </div>
           </div>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={onClear}
-            disabled={disabled}
-            aria-label="Remove selected file"
-          >
-            <X size={16} aria-hidden="true" />
-            <span>Remove</span>
-          </button>
+          {onClear && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={onClear}
+              disabled={disabled}
+              aria-label="Remove selected file"
+            >
+              <X size={16} aria-hidden="true" />
+              <span>Remove</span>
+            </button>
+          )}
         </div>
       )}
     </div>

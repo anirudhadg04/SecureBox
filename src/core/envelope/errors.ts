@@ -45,3 +45,19 @@ export class InvalidMetadataError extends EnvelopeError {
     Object.setPrototypeOf(this, InvalidMetadataError.prototype);
   }
 }
+
+export class InvalidArchiveManifestError extends EnvelopeError {
+  constructor(message = 'Archive manifest header is malformed, invalid, or corrupted', cause?: unknown) {
+    super(message, cause);
+    this.name = 'InvalidArchiveManifestError';
+    Object.setPrototypeOf(this, InvalidArchiveManifestError.prototype);
+  }
+}
+
+export class ArchiveIntegrityMismatchError extends EnvelopeError {
+  constructor(message = 'Archive file payload integrity check failed (SHA-256 mismatch or invalid offset/size)') {
+    super(message);
+    this.name = 'ArchiveIntegrityMismatchError';
+    Object.setPrototypeOf(this, ArchiveIntegrityMismatchError.prototype);
+  }
+}

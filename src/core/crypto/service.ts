@@ -1,3 +1,6 @@
+import { decryptArchive } from '../archive/archiveService';
+import { ArchiveManifest, RestoredArchiveFile } from '../archive/types';
+import { detectEnvelopeVersion } from '../envelope/archiveEnvelope';
 import { packEnvelope } from '../envelope/pack';
 import { unpackEnvelope } from '../envelope/unpack';
 import { decryptBytes, encryptBytes, generateAesKey, generateNonce } from './aesGcm';
@@ -12,10 +15,26 @@ export interface EncryptFileResult {
   metadata: SboxMetadata;
 }
 
+export type DecryptAnyResult =
+  | {
+      type: 'single';
+      plaintext: Uint8Array;
+      metadata: SboxMetadata;
+      downloadBlob: Blob;
+      downloadFilename: string;
+    }
+  | {
+      type: 'archive';
+      manifest: ArchiveManifest;
+      files: RestoredArchiveFile[];
+      downloadBlob: Blob;
+      downloadFilename: string;
+    };
+
 /**
- * High-level service function to securely encrypt a file buffer.
+ * High-level service function to securely encrypt a single file buffer.
  * Automatically generates a fresh 256-bit key (if not provided) and fresh 96-bit nonce,
- * cryptographically binds metadata via AAD, and packages the result into a .sbox envelope.
+ * cryptographically binds metadata via AAD, and packages the result into a .sbox v1 envelope.
  *
  * @param fileBytes Raw file bytes to encrypt.
  * @param metadata Non-secret metadata to bind to the file.
@@ -40,7 +59,7 @@ export async function encryptDocument(
   // Perform AES-256-GCM authenticated encryption with metadata bound as AAD
   const ciphertextWithTag = await encryptBytes(key, nonce, fileBytes, metadataBytes);
 
-  // Pack into the .sbox binary envelope
+  // Pack into the .sbox binary envelope (v1)
   const sboxBytes = packEnvelope({
     ciphertextWithTag,
     iv: nonce,
@@ -55,7 +74,7 @@ export async function encryptDocument(
 }
 
 /**
- * High-level service function to securely unpack and decrypt a .sbox file buffer.
+ * High-level service function to securely unpack and decrypt a single-file .sbox v1 file buffer.
  * Performs format validation, header bounds checking, and authenticated AES-GCM decryption.
  * If authentication fails or any bytes have been tampered with, rejects safely.
  *
@@ -76,5 +95,40 @@ export async function decryptDocument(
   return {
     plaintext,
     metadata,
+  };
+}
+
+/**
+ * Universal decryption router that detects the envelope version (v1 single-file or v2 archive)
+ * and safely decrypts, authenticates, and unpacks the contents.
+ */
+export async function decryptAnyDocument(
+  sboxBytes: Uint8Array,
+  key: CryptoKey
+): Promise<DecryptAnyResult> {
+  const version = detectEnvelopeVersion(sboxBytes);
+
+  if (version === 1) {
+    const { plaintext, metadata } = await decryptDocument(sboxBytes, key);
+    const blob = new Blob([plaintext as unknown as BlobPart], {
+      type: metadata.mimeType || 'application/octet-stream',
+    });
+    return {
+      type: 'single',
+      plaintext,
+      metadata,
+      downloadBlob: blob,
+      downloadFilename: metadata.originalName,
+    };
+  }
+
+  // Version 2: Multi-file archive
+  const restored = await decryptArchive(sboxBytes, key);
+  return {
+    type: 'archive',
+    manifest: restored.manifest,
+    files: restored.files,
+    downloadBlob: restored.zipBlob,
+    downloadFilename: restored.zipFilename,
   };
 }
