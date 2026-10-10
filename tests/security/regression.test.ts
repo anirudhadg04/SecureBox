@@ -11,6 +11,7 @@ import { ArchiveManifest } from '../../src/core/archive/types';
 import {
   sanitizeArchivePath,
   resolveUniquePaths,
+  restoreArchivePath,
 } from '../../src/core/archive/types';
 import {
   InvalidManifestIntegerError,
@@ -21,6 +22,60 @@ import {
   MetadataSizeMismatchError,
   InvalidMetadataError,
 } from '../../src/core/envelope/errors';
+import { computeSha256 } from '../../src/core/hashing/sha256';
+
+/**
+ * Assembles a .sbox v2 envelope exactly the way the pre-hardening release did:
+ * paths are written to the manifest verbatim with no validation, and the
+ * manifest is bound as AES-256-GCM AAD. Used to prove that archives created
+ * before strict path validation remain openable.
+ */
+async function buildLegacyArchiveEnvelope(
+  files: { path: string; data: Uint8Array }[],
+  archiveName: string
+): Promise<{ sboxBytes: Uint8Array; key: CryptoKey }> {
+  const key = await generateAesKey();
+  const nonce = generateNonce();
+
+  const entries = [];
+  const chunks: Uint8Array[] = [];
+  let offset = 0;
+
+  for (const file of files) {
+    entries.push({
+      path: file.path,
+      size: file.data.byteLength,
+      offset,
+      mimeType: 'application/octet-stream',
+      sha256: await computeSha256(file.data),
+    });
+    chunks.push(file.data);
+    offset += file.data.byteLength;
+  }
+
+  const totalPlaintextSize = offset;
+  const payload = new Uint8Array(totalPlaintextSize);
+  let position = 0;
+  for (const chunk of chunks) {
+    payload.set(chunk, position);
+    position += chunk.byteLength;
+  }
+
+  const manifest = {
+    version: 1 as const,
+    archiveName,
+    createdAt: 1_700_000_000_000,
+    fileCount: entries.length,
+    totalPlaintextSize,
+    files: entries,
+  };
+
+  const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));
+  const ciphertextWithTag = await encryptBytes(key, nonce, payload, manifestBytes);
+  const sboxBytes = packArchiveEnvelope({ ciphertextWithTag, iv: nonce, manifest });
+
+  return { sboxBytes, key };
+}
 
 describe('Security Regression Tests', () => {
   describe('SEC-01/SEC-03: Manifest Integer Validation and Archive Integrity', () => {
@@ -354,6 +409,140 @@ describe('Security Regression Tests', () => {
       expect(paths[0]).toBe('a.txt');
       expect(paths[1]).toBe('a (1).txt');
       expect(paths[2]).toBe('a (2).txt');
+    });
+  });
+
+  describe('SEC-02/SEC-04 regression: NTFS case folding, format characters, and restore compatibility', () => {
+    it('detects collisions for U+0131 and U+017F (NTFS upcase table folds these)', () => {
+      // NTFS folds U+0131 (dotless i) -> "I" and U+017F (long s) -> "S", so these
+      // collide on Windows. Plain toLowerCase() would leave them distinct.
+      const paths = resolveUniquePaths([
+        { path: 'i.txt' },
+        { path: '\u0131.txt' },
+      ]);
+      expect(paths).toHaveLength(2);
+      expect(paths[0]).not.toBe(paths[1]);
+      expect(paths[1]).toMatch(/ \(\d\)\.txt$/);
+
+      const paths2 = resolveUniquePaths([
+        { path: 's.txt' },
+        { path: '\u017f.txt' },
+      ]);
+      expect(paths2).toHaveLength(2);
+      expect(paths2[0]).not.toBe(paths2[1]);
+      expect(paths2[1]).toMatch(/ \(\d\)\.txt$/);
+    });
+
+    it('still resolves plain ASCII case-insensitive collisions', () => {
+      const paths = resolveUniquePaths([
+        { path: 'Report.txt' },
+        { path: 'report.txt' },
+      ]);
+      expect(paths).toHaveLength(2);
+      expect(paths[0]).toBe('Report.txt');
+      expect(paths[1]).toBe('report (1).txt');
+    });
+
+    it('strips Unicode format and bidi characters from paths', () => {
+      // U+202E RIGHT-TO-LEFT OVERRIDE enables filename extension spoofing.
+      expect(sanitizeArchivePath('evil\u202Egpj.exe')).toBe('evilgpj.exe');
+      expect(sanitizeArchivePath('a\u0085b.txt')).toBe('ab.txt');
+      expect(sanitizeArchivePath('zero\u200Bwidth.txt')).toBe('zerowidth.txt');
+      expect(sanitizeArchivePath('bom\uFEFF.txt')).toBe('bom.txt');
+    });
+
+    it('strips ASCII control characters as well as format characters', () => {
+      // sanitizeArchivePath removes (rather than rejects) characters that carry no
+      // filename meaning, so they can never reach the ZIP.
+      expect(sanitizeArchivePath('file\x01name.txt')).toBe('filename.txt');
+      expect(sanitizeArchivePath('file\x1Fname.txt')).toBe('filename.txt');
+      expect(sanitizeArchivePath('file\x7Fname.txt')).toBe('filename.txt');
+      expect(sanitizeArchivePath('file\x00name.txt')).toBe('filename.txt');
+    });
+
+    it('restoreArchivePath defuses ambiguous names instead of rejecting them', () => {
+      expect(restoreArchivePath('backup:2024.txt')).toBe('backup_2024.txt');
+      expect(restoreArchivePath('aux.log')).toBe('_aux.log');
+      expect(restoreArchivePath('CON')).toBe('_CON');
+      expect(restoreArchivePath('file.')).toBe('file');
+      expect(restoreArchivePath('trailing. ')).toBe('trailing');
+      expect(restoreArchivePath('C:\\Users\\Admin\\Secret.doc')).toBe('Users/Admin/Secret.doc');
+      expect(restoreArchivePath('../../../etc/passwd')).toBe('etc/passwd');
+      expect(restoreArchivePath('')).toBe('unnamed-file');
+    });
+
+    it('restores a legacy archive whose manifest names are platform-ambiguous', async () => {
+      // Simulates an archive written by the pre-hardening release: the manifest
+      // contains names that the strict encryption-time sanitizer now rejects, so
+      // the envelope is assembled directly from primitives exactly as the old
+      // encoder did. The manifest is AAD-authenticated, so restore must not fail.
+      const colonName = 'backup:2024.txt';
+      const reservedName = 'aux.log';
+      const files = [
+        { path: colonName, data: new TextEncoder().encode('colon payload') },
+        { path: reservedName, data: new TextEncoder().encode('reserved payload') },
+      ];
+
+      const { sboxBytes, key } = await buildLegacyArchiveEnvelope(files, 'legacy-ambiguous');
+
+      const restored = await decryptArchive(sboxBytes, key);
+
+      expect(restored.files).toHaveLength(2);
+      expect(restored.files[0].path).toBe('backup_2024.txt');
+      expect(restored.files[0].data).toEqual(files[0].data);
+      expect(restored.files[1].path).toBe('_aux.log');
+      expect(restored.files[1].data).toEqual(files[1].data);
+
+      // No file was discarded and the ZIP round-trips the payload bytes
+      const JSZip = (await import('jszip')).default;
+      const zip = await JSZip.loadAsync(restored.zipBlob);
+      expect(await zip.file('legacy-ambiguous/backup_2024.txt')!.async('uint8array')).toEqual(files[0].data);
+      expect(await zip.file('legacy-ambiguous/_aux.log')!.async('uint8array')).toEqual(files[1].data);
+    });
+
+    it('restores a legacy archive with a trailing-dot name without losing data', async () => {
+      const files = [
+        { path: 'notes.', data: new TextEncoder().encode('trailing dot payload') },
+      ];
+
+      const { sboxBytes, key } = await buildLegacyArchiveEnvelope(files, 'legacy-dot');
+      const restored = await decryptArchive(sboxBytes, key);
+
+      expect(restored.files).toHaveLength(1);
+      expect(restored.files[0].path).toBe('notes');
+      expect(restored.files[0].data).toEqual(files[0].data);
+    });
+
+    it('resolves collisions created by defusing distinct stored names', async () => {
+      // "aux.log" and "aux" both defuse through the reserved-name rule, and
+      // "file." and "file" both lose their trailing dot: all four must survive.
+      const files = [
+        { path: 'aux.log', data: new TextEncoder().encode('first') },
+        { path: 'aux', data: new TextEncoder().encode('second') },
+        { path: 'file.', data: new TextEncoder().encode('third') },
+        { path: 'file', data: new TextEncoder().encode('fourth') },
+      ];
+
+      const { sboxBytes, key } = await buildLegacyArchiveEnvelope(files, 'defuse-collide');
+      const restored = await decryptArchive(sboxBytes, key);
+
+      expect(restored.files).toHaveLength(4);
+      expect(new Set(restored.files.map((f) => f.path)).size).toBe(4);
+      expect(restored.files.map((f) => f.data)).toEqual(files.map((f) => f.data));
+    });
+
+    it('still rejects platform-ambiguous names at encryption time', async () => {
+      await expect(
+        encryptArchive([{ path: 'backup:2024.txt', data: new Uint8Array(1) }], 'strict')
+      ).rejects.toThrow(InvalidArchivePathError);
+
+      await expect(
+        encryptArchive([{ path: 'aux.log', data: new Uint8Array(1) }], 'strict')
+      ).rejects.toThrow(InvalidArchivePathError);
+
+      await expect(
+        encryptArchive([{ path: '../../etc/passwd', data: new Uint8Array(1) }], 'strict')
+      ).rejects.toThrow(InvalidArchivePathError);
     });
   });
 

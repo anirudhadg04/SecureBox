@@ -78,13 +78,27 @@ function isWindowsReservedName(segment: string): boolean {
 }
 
 /**
+ * Characters that must never appear in an archive path: C0 controls, DEL, C1
+ * controls, and Unicode format characters (bidi overrides, zero-width and
+ * BOM code points). The `u` flag enables the \p{Cf} property escape.
+ */
+const UNSAFE_PATH_CHARS = /[\u0000-\u001F\u007f-\u009f\p{Cf}]/gu;
+
+/**
  * Normalizes a path segment for cross-platform comparison.
  * - Applies Unicode NFC normalization
- * - Converts to lowercase for case-insensitive comparison
+ * - Applies a full case fold (toLowerCase -> toUpperCase -> toLowerCase) so that
+ *   folding matches the NTFS upcase table, which maps U+0131 to "I" and U+017F
+ *   to "S"; plain toLowerCase() leaves those distinct.
  * - Removes trailing dots and spaces (Windows behavior)
  */
 function normalizePathSegment(segment: string): string {
-  return segment.normalize('NFC').toLowerCase().replace(/[.\s]+$/, '');
+  return segment
+    .normalize('NFC')
+    .toLowerCase()
+    .toUpperCase()
+    .toLowerCase()
+    .replace(/[.\s]+$/, '');
 }
 
 /**
@@ -92,13 +106,9 @@ function normalizePathSegment(segment: string): string {
  * Throws InvalidArchivePathError if the segment is invalid.
  */
 function validatePathSegment(segment: string, fullPath: string): void {
-  if (segment.length === 0) {
-    throw new InvalidArchivePathError(`Empty path segment in "${fullPath}"`);
-  }
-
-  // Check for null bytes and control characters
-  if (/[\x00-\x1F\x7F]/.test(segment)) {
-    throw new InvalidArchivePathError(`Control characters not allowed in path segment "${segment}" of "${fullPath}"`);
+  // Check for null bytes, control characters, and Unicode format characters
+  if (UNSAFE_PATH_CHARS.test(segment)) {
+    throw new InvalidArchivePathError(`Control or format characters not allowed in path segment "${segment}" of "${fullPath}"`);
   }
 
   // Check for colon (Windows drive separator, also invalid in filenames)
@@ -135,8 +145,8 @@ export function sanitizeArchivePath(rawPath: string): string {
     throw new InvalidArchivePathError('Path must be a string');
   }
 
-  // Remove null bytes and control characters entirely
-  let sanitized = rawPath.replace(/[\x00-\x1F\x7F]/g, '');
+  // Remove null bytes, control characters, and Unicode format characters entirely
+  let sanitized = rawPath.replace(UNSAFE_PATH_CHARS, '');
 
   // Replace backslashes with forward slashes
   sanitized = sanitized.replace(/\\/g, '/');
@@ -178,6 +188,63 @@ export function sanitizeArchivePath(rawPath: string): string {
   return validatedSegments.join('/');
 }
 
+/**
+ * Replaces a single path segment with a safe equivalent without rejecting it.
+ * Used by the restore-time sanitizer so that legacy archives remain openable.
+ */
+function defusePathSegment(segment: string): string {
+  let defused = segment.replace(/:/g, '_');
+  // Windows strips trailing dots and spaces, which silently merges distinct names.
+  defused = defused.replace(/[.\s]+$/, '');
+  if (defused.length === 0) {
+    return 'unnamed-file';
+  }
+  if (isWindowsReservedName(defused)) {
+    defused = `_${defused}`;
+  }
+  if (defused.length > 255) {
+    defused = defused.slice(0, 255);
+  }
+  return defused;
+}
+
+/**
+ * Normalizes a path taken from an archive manifest at restore time.
+ *
+ * Unlike sanitizeArchivePath this never rejects the archive: the manifest is
+ * cryptographically authenticated (bound as AES-256-GCM AAD) and may have been
+ * written by an earlier release that accepted platform-ambiguous names. Those
+ * archives must stay openable, so unsafe characters and ambiguous shapes are
+ * defused instead of aborting the restore. Collisions introduced by defusing
+ * are resolved by resolveUniquePaths, so no file is discarded or overwritten.
+ */
+export function restoreArchivePath(rawPath: string): string {
+  if (typeof rawPath !== 'string') {
+    return 'unnamed-file';
+  }
+
+  let sanitized = rawPath.replace(UNSAFE_PATH_CHARS, '');
+  sanitized = sanitized.replace(/\\/g, '/');
+  sanitized = sanitized.replace(/^[a-zA-Z]:/, '');
+  sanitized = sanitized.replace(/^\/+/, '');
+
+  const resolvedSegments: string[] = [];
+  for (const seg of sanitized.split('/')) {
+    const trimmed = seg.trim();
+    // Drop empty, current-directory, and traversal segments rather than rejecting
+    if (trimmed.length === 0 || trimmed === '.' || trimmed === '..') {
+      continue;
+    }
+    resolvedSegments.push(defusePathSegment(trimmed));
+  }
+
+  if (resolvedSegments.length === 0) {
+    return 'unnamed-file';
+  }
+
+  return resolvedSegments.join('/');
+}
+
 /** Normalizes a full path for cross-platform comparison. */
 function normalizeFullPath(path: string): string {
   return path.split('/').map(normalizePathSegment).join('/');
@@ -209,12 +276,20 @@ function hasDirectoryConflict(a: string, b: string): boolean {
  *
  * Appends " (1)", " (2)", etc. before the extension if conflicts occur.
  * Never silently discards files or overwrites content.
+ *
+ * @param entries Paths to resolve.
+ * @param sanitize Sanitizer to apply first. Defaults to the strict
+ *   sanitizeArchivePath (encryption-time input); pass restoreArchivePath to
+ *   defuse rather than reject paths from an authenticated manifest.
  */
-export function resolveUniquePaths(entries: { path: string }[]): string[] {
+export function resolveUniquePaths(
+  entries: { path: string }[],
+  sanitize: (path: string) => string = sanitizeArchivePath
+): string[] {
   // First pass: sanitize all paths
   const sanitizedPaths: string[] = [];
   for (let i = 0; i < entries.length; i++) {
-    sanitizedPaths.push(sanitizeArchivePath(entries[i].path));
+    sanitizedPaths.push(sanitize(entries[i].path));
   }
 
   // Second pass: resolve conflicts, claiming normalized paths on first occurrence

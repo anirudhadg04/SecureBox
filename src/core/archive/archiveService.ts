@@ -9,7 +9,7 @@ import {
   RestoredArchive,
   RestoredArchiveFile,
   resolveUniquePaths,
-  sanitizeArchivePath,
+  restoreArchivePath,
 } from './types';
 import { createRestoredZipBlob } from './zipRestore';
 
@@ -160,7 +160,7 @@ export async function decryptArchive(
       );
     }
 
-    const cleanPath = sanitizeArchivePath(entry.path);
+    const cleanPath = restoreArchivePath(entry.path);
 
     restoredFiles.push({
       path: cleanPath,
@@ -171,8 +171,9 @@ export async function decryptArchive(
     });
   }
 
-  // 5. Ensure paths in restored collection are unique (defense-in-depth against malicious duplicate entries)
-  const uniquePaths = resolveUniquePaths(restoredFiles.map((f) => ({ path: f.path })));
+  // 5. Ensure paths in restored collection are unique (defense-in-depth against duplicate entries).
+  //    Uses the restore-time sanitizer so defensive renames never reject an authenticated archive.
+  const uniquePaths = resolveUniquePaths(restoredFiles.map((f) => ({ path: f.path })), restoreArchivePath);
   for (let i = 0; i < restoredFiles.length; i++) {
     restoredFiles[i].path = uniquePaths[i];
   }
