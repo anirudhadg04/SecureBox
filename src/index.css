@@ -470,3 +470,123 @@ body {
   color: var(--text-muted);
   line-height: 1.6;
 }
+
+/* Subtle Lava-Lamp Ambient Background Blobs (Lightweight CSS transforms, low CPU/GPU) */
+.lava-lamp-bg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: -1;
+  overflow: hidden;
+  opacity: 0.45;
+}
+
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 0.5;
+  will-change: transform;
+}
+
+.blob-1 {
+  top: -10%;
+  left: 10%;
+  width: 450px;
+  height: 450px;
+  background: radial-gradient(circle, rgba(2, 132, 199, 0.25) 0%, rgba(240, 249, 255, 0) 70%);
+  animation: floatSlow 22s ease-in-out infinite alternate;
+}
+
+.blob-2 {
+  bottom: 5%;
+  right: 5%;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.2) 0%, rgba(236, 253, 245, 0) 70%);
+  animation: floatSlow 28s ease-in-out infinite alternate-reverse;
+}
+
+.blob-3 {
+  top: 40%;
+  left: 60%;
+  width: 380px;
+  height: 380px;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.15) 0%, rgba(245, 243, 255, 0) 70%);
+  animation: floatSlow 25s ease-in-out infinite alternate;
+}
+
+@keyframes floatSlow {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(30px, 40px) scale(1.05);
+  }
+  100% {
+    transform: translate(-25px, 20px) scale(0.95);
+  }
+}
+
+/* Modal Backdrop */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 1000;
+}
+
+.modal-card {
+  width: 100%;
+  max-width: 540px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+/* Storage Meter */
+.storage-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.meter-track {
+  width: 120px;
+  height: 6px;
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  background-color: var(--border-focus);
+  border-radius: 9999px;
+  transition: width 0.3s ease;
+}
+
+/* Vault Table & Badges */
+.badge-shared {
+  display: inline-block;
+  padding: 2px 6px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 4px;
+  background-color: var(--state-info-bg);
+  color: var(--state-info-text);
+  border: 1px solid var(--state-info-border);
+}
+
+.vault-table tbody tr:hover {
+  background-color: var(--bg-subtle);
+}

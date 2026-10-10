@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, Download, Copy, Check, ShieldAlert, RotateCcw, X, File as FileIcon } from 'lucide-react';
+import { Lock, Download, Copy, Check, ShieldAlert, RotateCcw, X, File as FileIcon, HardDrive } from 'lucide-react';
 import { encryptDocument } from '../../core/crypto/service';
 import { encryptArchive } from '../../core/archive/archiveService';
 import { exportKeyBackup, exportKeyToHex } from '../../core/crypto/keyUtils';
+import { computeSha256 } from '../../core/hashing/sha256';
 import { FileDropzone, formatFileSize } from './common/FileDropzone';
 import { Banner } from './common/Banner';
+import { useAuth } from '../context/AuthContext';
+import { api } from '../../services/api';
 
 export const EncryptPanel: React.FC = () => {
   const [files, setFiles] = useState<File[]>([]);
@@ -18,6 +21,13 @@ export const EncryptPanel: React.FC = () => {
   const [keyBackupJson, setKeyBackupJson] = useState<string>('');
   const [copiedKey, setCopiedKey] = useState<boolean>(false);
   const [encryptedSummary, setEncryptedSummary] = useState<{ fileCount: number; totalSize: number } | null>(null);
+
+  // Stored raw sbox bytes for saving to vault
+  const [encryptedSboxBytes, setEncryptedSboxBytes] = useState<Uint8Array | null>(null);
+  const [savedToVault, setSavedToVault] = useState<boolean>(false);
+  const [savingToVault, setSavingToVault] = useState<boolean>(false);
+
+  const { user } = useAuth();
 
   // SEC-06: Revoke object URL on component unmount and when URL changes
   useEffect(() => {
@@ -74,6 +84,7 @@ export const EncryptPanel: React.FC = () => {
         setKeyHex(hex);
         setKeyBackupJson(JSON.stringify(backup, null, 2));
         setEncryptedSummary({ fileCount: 1, totalSize: file.size });
+        setEncryptedSboxBytes(result.sboxBytes);
         setStatus('success');
       } else {
         // Multi-file collection encryption (Envelope v2)
@@ -101,6 +112,7 @@ export const EncryptPanel: React.FC = () => {
         setKeyHex(hex);
         setKeyBackupJson(JSON.stringify(backup, null, 2));
         setEncryptedSummary({ fileCount: files.length, totalSize });
+        setEncryptedSboxBytes(result.sboxBytes);
         setStatus('success');
       }
     } catch (err) {
@@ -134,6 +146,36 @@ export const EncryptPanel: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const handleSaveToVault = async () => {
+    if (!encryptedSboxBytes || !user || savedToVault || savingToVault) return;
+    setSavingToVault(true);
+    try {
+      let binary = '';
+      for (let i = 0; i < encryptedSboxBytes.length; i++) {
+        binary += String.fromCharCode(encryptedSboxBytes[i]);
+      }
+      const b64 = btoa(binary);
+      const sha = await computeSha256(encryptedSboxBytes);
+
+      await api.uploadDocument({
+        name: downloadFilename.replace(/\.sbox$/i, ''),
+        ciphertextBase64: b64,
+        plaintextSize: encryptedSummary?.totalSize || encryptedSboxBytes.length,
+        mimeType: 'application/octet-stream',
+        formatVersion: files.length > 1 ? 2 : 1,
+        fileCount: encryptedSummary?.fileCount || 1,
+        sha256Ciphertext: sha,
+        wrappedKeyOwner: keyHex,
+      });
+
+      setSavedToVault(true);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to save to vault.');
+    } finally {
+      setSavingToVault(false);
+    }
+  };
+
   const handleReset = () => {
     setFiles([]);
     setArchiveName('securebox-archive');
@@ -145,6 +187,9 @@ export const EncryptPanel: React.FC = () => {
     setKeyBackupJson('');
     setCopiedKey(false);
     setEncryptedSummary(null);
+    setEncryptedSboxBytes(null);
+    setSavedToVault(false);
+    setSavingToVault(false);
   };
 
   return (
@@ -338,6 +383,18 @@ export const EncryptPanel: React.FC = () => {
               <Download size={18} aria-hidden="true" />
               <span>Download Key Backup (.key)</span>
             </button>
+
+            {user && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleSaveToVault}
+                disabled={savedToVault || savingToVault}
+              >
+                {savedToVault ? <Check size={18} aria-hidden="true" color="var(--state-success-text)" /> : <HardDrive size={18} aria-hidden="true" />}
+                <span>{savedToVault ? 'Saved to Vault' : savingToVault ? 'Saving...' : 'Save to Private Vault'}</span>
+              </button>
+            )}
           </div>
 
           <div className="form-group" style={{ marginTop: '24px' }}>
