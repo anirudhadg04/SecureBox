@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, Download, Copy, Check, ShieldAlert, RotateCcw, X, File as FileIcon, HardDrive } from 'lucide-react';
+import { Lock, Download, Copy, Check, ShieldAlert, RotateCcw, X, File as FileIcon, HardDrive, Send } from 'lucide-react';
 import { encryptDocument } from '../../core/crypto/service';
 import { encryptArchive } from '../../core/archive/archiveService';
 import { exportKeyBackup, exportKeyToHex } from '../../core/crypto/keyUtils';
@@ -8,8 +8,13 @@ import { FileDropzone, formatFileSize } from './common/FileDropzone';
 import { Banner } from './common/Banner';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../../services/api';
+import { SendDecryptionKeyModal } from './SendDecryptionKeyModal';
 
-export const EncryptPanel: React.FC = () => {
+interface EncryptPanelProps {
+  onRequireRegister?: () => void;
+}
+
+export const EncryptPanel: React.FC<EncryptPanelProps> = ({ onRequireRegister }) => {
   const [files, setFiles] = useState<File[]>([]);
   const [archiveName, setArchiveName] = useState<string>('securebox-archive');
   const [status, setStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
@@ -26,6 +31,7 @@ export const EncryptPanel: React.FC = () => {
   const [encryptedSboxBytes, setEncryptedSboxBytes] = useState<Uint8Array | null>(null);
   const [savedToVault, setSavedToVault] = useState<boolean>(false);
   const [savingToVault, setSavingToVault] = useState<boolean>(false);
+  const [showSendKeyModal, setShowSendKeyModal] = useState<boolean>(false);
 
   const { user } = useAuth();
 
@@ -419,9 +425,25 @@ export const EncryptPanel: React.FC = () => {
                 {copiedKey ? <Check size={18} aria-hidden="true" /> : <Copy size={18} aria-hidden="true" />}
                 <span>{copiedKey ? 'Copied' : 'Copy'}</span>
               </button>
+
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  if (!user) {
+                    if (onRequireRegister) onRequireRegister();
+                  } else {
+                    setShowSendKeyModal(true);
+                  }
+                }}
+                aria-label="Send decryption key to username collaborator"
+              >
+                <Send size={16} aria-hidden="true" />
+                <span>Send Decryption Key</span>
+              </button>
             </div>
             <p className="form-help">
-              This key is required to decrypt your file later. SecureBox stores no copy.
+              This key is required to decrypt your file later. SecureBox stores no copy. {user ? 'You can also send it directly to a collaborator by username.' : 'Register an account to send keys directly to collaborators.'}
             </p>
           </div>
 
@@ -446,6 +468,14 @@ export const EncryptPanel: React.FC = () => {
             </button>
           </div>
         </div>
+      )}
+
+      {showSendKeyModal && (
+        <SendDecryptionKeyModal
+          documentName={downloadFilename.replace(/\.sbox$/i, '') || 'Document'}
+          keyHex={keyHex}
+          onClose={() => setShowSendKeyModal(false)}
+        />
       )}
     </div>
   );

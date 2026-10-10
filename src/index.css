@@ -142,72 +142,40 @@ body {
   max-width: 720px;
 }
 
-/* Workspace Navigation Controls */
-.workspace-controls {
+/* Tabs Navigation */
+.tabs-nav {
   display: flex;
-  justify-content: flex-end;
-  margin-bottom: 20px;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 24px;
+  overflow-x: auto;
 }
 
-.workspace-toggle-group {
-  display: inline-flex;
-  background-color: var(--bg-subtle);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: 3px;
-  gap: 2px;
-}
-
-.workspace-tab-btn {
+.tab-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
+  gap: 8px;
+  padding: 10px 16px;
   font-family: inherit;
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
   font-weight: 500;
   color: var(--text-secondary);
   background: transparent;
   border: none;
-  border-radius: var(--radius-sm);
+  border-bottom: 2px solid transparent;
   cursor: pointer;
+  white-space: nowrap;
   transition: all 0.15s ease-in-out;
 }
 
-.workspace-tab-btn:hover {
+.tab-btn:hover {
   color: var(--text-primary);
 }
 
-.workspace-tab-btn.active {
-  background: var(--bg-card);
+.tab-btn[aria-selected="true"] {
   color: var(--text-primary);
+  border-bottom-color: var(--border-focus);
   font-weight: 600;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-}
-
-/* Responsive Workspace Grid */
-.workspace-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 24px;
-  align-items: stretch;
-}
-
-@media (min-width: 960px) {
-  .workspace-grid.split {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
-.workspace-col {
-  display: flex;
-  flex-direction: column;
-}
-
-.workspace-col .panel-card {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
 }
 
 /* Card Panel */
@@ -481,53 +449,69 @@ body {
   pointer-events: none;
   z-index: -1;
   overflow: hidden;
-  opacity: 0.45;
+  opacity: 0.55;
 }
 
 .blob {
   position: absolute;
-  border-radius: 50%;
-  filter: blur(60px);
+  border-radius: 40% 60% 70% 30% / 40% 50% 60% 50%;
+  filter: blur(55px);
   opacity: 0.5;
   will-change: transform;
 }
 
 .blob-1 {
   top: -10%;
-  left: 10%;
-  width: 450px;
-  height: 450px;
-  background: radial-gradient(circle, rgba(2, 132, 199, 0.25) 0%, rgba(240, 249, 255, 0) 70%);
-  animation: floatSlow 22s ease-in-out infinite alternate;
+  left: 5%;
+  width: 480px;
+  height: 480px;
+  background: radial-gradient(circle, rgba(2, 132, 199, 0.3) 0%, rgba(240, 249, 255, 0) 70%);
+  animation: floatSlow 24s ease-in-out infinite alternate;
 }
 
 .blob-2 {
-  bottom: 5%;
+  bottom: -5%;
   right: 5%;
-  width: 500px;
-  height: 500px;
-  background: radial-gradient(circle, rgba(16, 185, 129, 0.2) 0%, rgba(236, 253, 245, 0) 70%);
-  animation: floatSlow 28s ease-in-out infinite alternate-reverse;
+  width: 520px;
+  height: 520px;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.25) 0%, rgba(236, 253, 245, 0) 70%);
+  animation: floatSlow 30s ease-in-out infinite alternate-reverse;
 }
 
 .blob-3 {
-  top: 40%;
-  left: 60%;
-  width: 380px;
-  height: 380px;
-  background: radial-gradient(circle, rgba(139, 92, 246, 0.15) 0%, rgba(245, 243, 255, 0) 70%);
-  animation: floatSlow 25s ease-in-out infinite alternate;
+  top: 35%;
+  left: 55%;
+  width: 420px;
+  height: 420px;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.2) 0%, rgba(245, 243, 255, 0) 70%);
+  animation: floatSlow 26s ease-in-out infinite alternate;
+}
+
+.blob-4 {
+  bottom: 20%;
+  left: 15%;
+  width: 360px;
+  height: 360px;
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.15) 0%, rgba(254, 243, 199, 0) 70%);
+  animation: floatSlow 34s ease-in-out infinite alternate-reverse;
 }
 
 @keyframes floatSlow {
   0% {
-    transform: translate(0, 0) scale(1);
+    transform: translate(0, 0) rotate(0deg) scale(1);
+    border-radius: 40% 60% 70% 30% / 40% 50% 60% 50%;
   }
-  50% {
-    transform: translate(30px, 40px) scale(1.05);
+  33% {
+    transform: translate(35px, -30px) rotate(120deg) scale(1.08);
+    border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
+  }
+  66% {
+    transform: translate(-25px, 40px) rotate(240deg) scale(0.92);
+    border-radius: 30% 70% 50% 50% / 50% 60% 40% 60%;
   }
   100% {
-    transform: translate(-25px, 20px) scale(0.95);
+    transform: translate(20px, 20px) rotate(360deg) scale(1.04);
+    border-radius: 40% 60% 70% 30% / 40% 50% 60% 50%;
   }
 }
 

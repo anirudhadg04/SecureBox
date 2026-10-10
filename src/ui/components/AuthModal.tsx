@@ -85,8 +85,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({ initialMode = 'login', onC
   };
 
   return (
-    <div className="auth-card panel-card">
-      <div className="panel-header" style={{ textAlign: 'center' }}>
+    <div className="auth-card panel-card" style={{ position: 'relative' }}>
+      {onClose && (
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={onClose}
+          style={{ position: 'absolute', top: '16px', right: '16px', padding: '4px 8px' }}
+          aria-label="Close"
+        >
+          ✕
+        </button>
+      )}
+      <div className="panel-header" style={{ textAlign: 'center', marginTop: '8px' }}>
         <h2 className="panel-title" style={{ fontSize: '1.4rem' }}>
           {mode === 'login' && 'Sign in to SecureBox Vault'}
           {mode === 'register' && 'Create SecureBox Account'}
