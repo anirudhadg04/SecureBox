@@ -1,10 +1,13 @@
 import { ArchiveManifest } from '../archive/types';
 import {
-  ArchiveIntegrityMismatchError,
   EnvelopeError,
   EnvelopeTruncatedError,
   InvalidArchiveManifestError,
   InvalidMagicBytesError,
+  InvalidManifestIntegerError,
+  ManifestEntryBoundsError,
+  ManifestFileCountMismatchError,
+  ManifestNonContiguousError,
   UnsupportedAlgorithmError,
   UnsupportedVersionError,
 } from './errors';
@@ -13,7 +16,9 @@ import {
   FORMAT_VERSION_1,
   FORMAT_VERSION_2,
   MAGIC_BYTES,
+  MAX_ARCHIVE_FILE_COUNT,
   MAX_MANIFEST_LENGTH_BYTES,
+  MAX_TOTAL_PLAINTEXT_SIZE_BYTES,
   MIN_ARCHIVE_ENVELOPE_SIZE_BYTES,
   NONCE_LENGTH_BYTES,
   TAG_LENGTH_BYTES,
@@ -123,6 +128,19 @@ export function packArchiveEnvelope(payload: PackedArchivePayload): Uint8Array {
 }
 
 /**
+ * Validates that a value is a safe integer within the specified bounds.
+ */
+function validateSafeInteger(value: unknown, fieldName: string, min: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
+    throw new InvalidManifestIntegerError(`${fieldName} must be a safe integer, got ${JSON.stringify(value)}`);
+  }
+  if (value < min || value > max) {
+    throw new InvalidManifestIntegerError(`${fieldName} must be between ${min} and ${max}, got ${value}`);
+  }
+  return value;
+}
+
+/**
  * Validates and unpacks a .sbox Archive binary envelope (v2).
  */
 export function unpackArchiveEnvelope(fileBytes: Uint8Array): UnpackedArchiveEnvelope {
@@ -201,13 +219,16 @@ export function unpackArchiveEnvelope(fileBytes: Uint8Array): UnpackedArchiveEnv
     if (!Array.isArray(manifest.files)) {
       throw new Error('Manifest files must be an array');
     }
+
+    // SEC-01/SEC-03: Validate integer fields with safe integer checks and bounds
+    validateSafeInteger(manifest.fileCount, 'fileCount', 0, MAX_ARCHIVE_FILE_COUNT);
+    validateSafeInteger(manifest.totalPlaintextSize, 'totalPlaintextSize', 0, MAX_TOTAL_PLAINTEXT_SIZE_BYTES);
+
+    // Validate fileCount matches actual files array length
     if (manifest.fileCount !== manifest.files.length) {
-      throw new Error(
+      throw new ManifestFileCountMismatchError(
         `Declared fileCount (${manifest.fileCount}) does not match files array length (${manifest.files.length})`
       );
-    }
-    if (typeof manifest.totalPlaintextSize !== 'number' || manifest.totalPlaintextSize < 0) {
-      throw new Error('Invalid totalPlaintextSize in manifest');
     }
 
     // Validate each file entry structure
@@ -215,21 +236,79 @@ export function unpackArchiveEnvelope(fileBytes: Uint8Array): UnpackedArchiveEnv
       if (!entry.path || typeof entry.path !== 'string') {
         throw new Error('Invalid path in manifest entry');
       }
-      if (typeof entry.size !== 'number' || entry.size < 0) {
-        throw new Error(`Invalid size for entry ${entry.path}`);
-      }
-      if (typeof entry.offset !== 'number' || entry.offset < 0) {
-        throw new Error(`Invalid offset for entry ${entry.path}`);
-      }
-      if (entry.offset + entry.size > manifest.totalPlaintextSize) {
-        throw new ArchiveIntegrityMismatchError(
-          `Entry ${entry.path} bounds (${entry.offset} + ${entry.size}) exceed total plain text size (${manifest.totalPlaintextSize})`
-        );
-      }
+      validateSafeInteger(entry.size, `size for "${entry.path}"`, 0, MAX_TOTAL_PLAINTEXT_SIZE_BYTES);
+      validateSafeInteger(entry.offset, `offset for "${entry.path}"`, 0, MAX_TOTAL_PLAINTEXT_SIZE_BYTES);
       if (!entry.sha256 || typeof entry.sha256 !== 'string' || entry.sha256.length !== 64) {
         throw new Error(`Invalid SHA-256 digest for entry ${entry.path}`);
       }
+      if (typeof entry.mimeType !== 'string') {
+        throw new Error(`Invalid MIME type for entry ${entry.path}`);
+      }
+
+      // Check that entry bounds don't exceed total plaintext size
+      const endOffset = entry.offset + entry.size;
+      if (!Number.isSafeInteger(endOffset) || endOffset > manifest.totalPlaintextSize) {
+        throw new ManifestEntryBoundsError(
+          `Entry ${entry.path} bounds (offset ${entry.offset} + size ${entry.size} = ${endOffset}) exceed total plaintext size (${manifest.totalPlaintextSize})`
+        );
+      }
     }
+
+    // SEC-01/SEC-03: Validate contiguous, non-overlapping ranges starting at offset 0
+    if (manifest.files.length > 0) {
+      // Sort entries by offset to check contiguity
+      const sortedEntries = [...manifest.files].sort((a, b) => a.offset - b.offset);
+
+      // First entry must start at offset 0
+      if (sortedEntries[0].offset !== 0) {
+        throw new ManifestNonContiguousError(
+          `First file entry must start at offset 0, but "${sortedEntries[0].path}" starts at offset ${sortedEntries[0].offset}`
+        );
+      }
+
+      // Check for overlaps and gaps
+      for (let i = 0; i < sortedEntries.length - 1; i++) {
+        const current = sortedEntries[i];
+        const next = sortedEntries[i + 1];
+        const currentEnd = current.offset + current.size;
+
+        if (next.offset < currentEnd) {
+          throw new ManifestNonContiguousError(
+            `File entries overlap: "${current.path}" (offset ${current.offset}, size ${current.size}, ends at ${currentEnd}) ` +
+            `overlaps with "${next.path}" (offset ${next.offset})`
+          );
+        }
+
+        if (next.offset > currentEnd) {
+          throw new ManifestNonContiguousError(
+            `Gap detected between file entries: "${current.path}" ends at offset ${currentEnd}, ` +
+            `but "${next.path}" starts at offset ${next.offset}`
+          );
+        }
+      }
+
+      // Last entry must end exactly at totalPlaintextSize (no trailing unaccounted bytes)
+      const lastEntry = sortedEntries[sortedEntries.length - 1];
+      const lastEnd = lastEntry.offset + lastEntry.size;
+      if (lastEnd !== manifest.totalPlaintextSize) {
+        throw new ManifestNonContiguousError(
+          `Final file entry "${lastEntry.path}" ends at offset ${lastEnd}, ` +
+          `but totalPlaintextSize is ${manifest.totalPlaintextSize} (${lastEnd !== manifest.totalPlaintextSize ? 'trailing unaccounted bytes' : 'OK'})`
+        );
+      }
+    } else {
+      // Empty archive: totalPlaintextSize must be 0
+      if (manifest.totalPlaintextSize !== 0) {
+        throw new ManifestNonContiguousError(
+          `Empty archive must have totalPlaintextSize of 0, got ${manifest.totalPlaintextSize}`
+        );
+      }
+    }
+
+    // SEC-01/SEC-03: Zero-byte files are valid - they have size 0 and occupy no range
+    // They must still have valid offsets (which will be equal to the next file's offset or totalPlaintextSize)
+    // The contiguity checks above already handle this correctly
+
   } catch (error) {
     if (error instanceof EnvelopeError) throw error;
     throw new InvalidArchiveManifestError('Failed to parse or validate archive manifest', error);

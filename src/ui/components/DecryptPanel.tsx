@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { Unlock, Download, RotateCcw, KeyRound, Upload, FileText, CheckCircle2 } from 'lucide-react';
 import { decryptAnyDocument, DecryptAnyResult } from '../../core/crypto/service';
 import { parseKeyFromInput } from '../../core/crypto/keyUtils';
@@ -15,6 +15,15 @@ export const DecryptPanel: React.FC = () => {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
 
   const keyFileInputRef = useRef<HTMLInputElement>(null);
+
+  // SEC-06: Revoke object URL on component unmount
+  useEffect(() => {
+    return () => {
+      if (downloadUrl) {
+        URL.revokeObjectURL(downloadUrl);
+      }
+    };
+  }, [downloadUrl]);
 
   const handleKeyFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -44,7 +53,7 @@ export const DecryptPanel: React.FC = () => {
       // 3. Authenticated decryption (handles both single-file v1 and archive v2)
       const result = await decryptAnyDocument(sboxBytes, key);
 
-      // 4. Create object URL for download
+      // 4. Create object URL for download (revoke previous if any)
       const url = URL.createObjectURL(result.downloadBlob);
 
       setDecryptedResult(result);
@@ -59,9 +68,6 @@ export const DecryptPanel: React.FC = () => {
   };
 
   const handleReset = () => {
-    if (downloadUrl) {
-      URL.revokeObjectURL(downloadUrl);
-    }
     setFile(null);
     setKeyInput('');
     setStatus('idle');

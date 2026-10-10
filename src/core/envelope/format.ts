@@ -40,6 +40,12 @@ export const MAX_METADATA_LENGTH_BYTES = 4096;
 /** Maximum allowable archive manifest length in bytes (1 MiB safety limit) */
 export const MAX_MANIFEST_LENGTH_BYTES = 1024 * 1024;
 
+/** Maximum number of files allowed in a single archive (prevents resource exhaustion) */
+export const MAX_ARCHIVE_FILE_COUNT = 10000;
+
+/** Maximum total plaintext size in bytes (1 GiB safety limit for in-memory processing) */
+export const MAX_TOTAL_PLAINTEXT_SIZE_BYTES = 1024 * 1024 * 1024;
+
 /** Minimum size of a valid .sbox single-file envelope: Header (21B) + Min Tag (16B) = 37 bytes */
 export const MIN_ENVELOPE_SIZE_BYTES = 4 + 1 + 1 + 1 + NONCE_LENGTH_BYTES + 2 + TAG_LENGTH_BYTES;
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Lock, Download, Copy, Check, ShieldAlert, RotateCcw, X, File as FileIcon } from 'lucide-react';
 import { encryptDocument } from '../../core/crypto/service';
 import { encryptArchive } from '../../core/archive/archiveService';
@@ -18,6 +18,15 @@ export const EncryptPanel: React.FC = () => {
   const [keyBackupJson, setKeyBackupJson] = useState<string>('');
   const [copiedKey, setCopiedKey] = useState<boolean>(false);
   const [encryptedSummary, setEncryptedSummary] = useState<{ fileCount: number; totalSize: number } | null>(null);
+
+  // SEC-06: Revoke object URL on component unmount and when URL changes
+  useEffect(() => {
+    return () => {
+      if (encryptedBlobUrl) {
+        URL.revokeObjectURL(encryptedBlobUrl);
+      }
+    };
+  }, [encryptedBlobUrl]);
 
   const handleFilesSelect = (newFiles: File[]) => {
     setFiles((prev) => [...prev, ...newFiles]);
@@ -126,9 +135,6 @@ export const EncryptPanel: React.FC = () => {
   };
 
   const handleReset = () => {
-    if (encryptedBlobUrl) {
-      URL.revokeObjectURL(encryptedBlobUrl);
-    }
     setFiles([]);
     setArchiveName('securebox-archive');
     setStatus('idle');

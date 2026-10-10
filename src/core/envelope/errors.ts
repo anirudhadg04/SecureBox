@@ -61,3 +61,51 @@ export class ArchiveIntegrityMismatchError extends EnvelopeError {
     Object.setPrototypeOf(this, ArchiveIntegrityMismatchError.prototype);
   }
 }
+
+export class InvalidManifestIntegerError extends EnvelopeError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidManifestIntegerError';
+    Object.setPrototypeOf(this, InvalidManifestIntegerError.prototype);
+  }
+}
+
+export class ManifestFileCountMismatchError extends EnvelopeError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ManifestFileCountMismatchError';
+    Object.setPrototypeOf(this, ManifestFileCountMismatchError.prototype);
+  }
+}
+
+export class ManifestEntryBoundsError extends EnvelopeError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ManifestEntryBoundsError';
+    Object.setPrototypeOf(this, ManifestEntryBoundsError.prototype);
+  }
+}
+
+export class ManifestNonContiguousError extends EnvelopeError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ManifestNonContiguousError';
+    Object.setPrototypeOf(this, ManifestNonContiguousError.prototype);
+  }
+}
+
+export class InvalidArchivePathError extends EnvelopeError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidArchivePathError';
+    Object.setPrototypeOf(this, InvalidArchivePathError.prototype);
+  }
+}
+
+export class MetadataSizeMismatchError extends EnvelopeError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MetadataSizeMismatchError';
+    Object.setPrototypeOf(this, MetadataSizeMismatchError.prototype);
+  }
+}

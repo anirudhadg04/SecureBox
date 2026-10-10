@@ -5,10 +5,11 @@ import { decryptAnyDocument, encryptDocument } from '../../src/core/crypto/servi
 import { DecryptionError } from '../../src/core/crypto/types';
 import { decryptArchive, encryptArchive } from '../../src/core/archive/archiveService';
 import {
-  ArchiveIntegrityMismatchError,
   EnvelopeTruncatedError,
   InvalidArchiveManifestError,
+  InvalidArchivePathError,
   InvalidMagicBytesError,
+  ManifestEntryBoundsError,
   UnsupportedVersionError,
 } from '../../src/core/envelope/errors';
 import {
@@ -102,12 +103,15 @@ describe('Multi-File Archive Encryption & Folder Restoration Engine', () => {
     expect(zip.file('company-reports/financials/2026/q2.txt')).not.toBeNull();
   });
 
-  it('sanitizes directory traversal attempts (.. and drive letters)', () => {
-    expect(sanitizeArchivePath('../../etc/passwd')).toBe('etc/passwd');
-    expect(sanitizeArchivePath('..\\..\\Windows\\System32\\cmd.exe')).toBe('Windows/System32/cmd.exe');
+  it('rejects directory traversal attempts and sanitizes valid paths', () => {
+    // Traversal attempts should be rejected
+    expect(() => sanitizeArchivePath('../../etc/passwd')).toThrow(InvalidArchivePathError);
+    expect(() => sanitizeArchivePath('..\\..\\Windows\\System32\\cmd.exe')).toThrow(InvalidArchivePathError);
+    expect(() => sanitizeArchivePath('../../../')).toThrow(InvalidArchivePathError);
+
+    // Valid paths with drive letters and extra slashes should be sanitized
     expect(sanitizeArchivePath('C:\\Users\\Admin\\Secret.doc')).toBe('Users/Admin/Secret.doc');
     expect(sanitizeArchivePath('///nested/path/file.txt')).toBe('nested/path/file.txt');
-    expect(sanitizeArchivePath('../../../')).toBe('unnamed-file');
   });
 
   it('safely handles duplicate filenames without silent overwrites', async () => {
@@ -291,6 +295,6 @@ describe('Multi-File Archive Encryption & Folder Restoration Engine', () => {
       manifest: JSON.parse(manifestJson),
     });
 
-    expect(() => unpackArchiveEnvelope(packed)).toThrow(ArchiveIntegrityMismatchError);
+    expect(() => unpackArchiveEnvelope(packed)).toThrow(ManifestEntryBoundsError);
   });
 });

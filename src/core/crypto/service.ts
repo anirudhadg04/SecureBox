@@ -5,6 +5,7 @@ import { packEnvelope } from '../envelope/pack';
 import { unpackEnvelope } from '../envelope/unpack';
 import { decryptBytes, encryptBytes, generateAesKey, generateNonce } from './aesGcm';
 import { DecryptedPayload, SboxMetadata } from './types';
+import { MetadataSizeMismatchError } from '../envelope/errors';
 
 export interface EncryptFileResult {
   /** Serialized .sbox file bytes containing header, metadata, nonce, and ciphertext+tag */
@@ -77,6 +78,7 @@ export async function encryptDocument(
  * High-level service function to securely unpack and decrypt a single-file .sbox v1 file buffer.
  * Performs format validation, header bounds checking, and authenticated AES-GCM decryption.
  * If authentication fails or any bytes have been tampered with, rejects safely.
+ * Validates that the authenticated metadata size matches the actual decrypted plaintext length.
  *
  * @param sboxBytes Raw binary content of a .sbox file.
  * @param key The 256-bit CryptoKey.
@@ -91,6 +93,16 @@ export async function decryptDocument(
 
   // 2. Authenticated decryption with metadata as AAD
   const plaintext = await decryptBytes(key, iv, ciphertextWithTag, metadataBytes);
+
+  // 3. SEC-05: Validate authenticated metadata size against actual decrypted plaintext length
+  if (!Number.isSafeInteger(metadata.size) || metadata.size < 0) {
+    throw new MetadataSizeMismatchError(`Invalid size in metadata: ${metadata.size}`);
+  }
+  if (plaintext.byteLength !== metadata.size) {
+    throw new MetadataSizeMismatchError(
+      `Decrypted payload size (${plaintext.byteLength} B) does not match authenticated metadata size (${metadata.size} B)`
+    );
+  }
 
   return {
     plaintext,
