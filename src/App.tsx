@@ -58,18 +58,8 @@ const AppContent: React.FC = () => {
       <div className="glass-window">
         {/* Leftmost slim icon rail */}
         <aside className="icon-rail" aria-label="Quick Switcher">
-          <div
-            className="rail-avatar"
-            title={user ? `${user.username} (${user.email})` : 'Guest User'}
-          >
-            {user ? (
-              user.username.charAt(0).toUpperCase()
-            ) : (
-              <span style={{ fontSize: '0.85rem' }}>SB</span>
-            )}
-          </div>
+          
 
-          <div className="sidebar-section-title" style={{ fontSize: '0.625rem', marginTop: '8px' }}>MAIN</div>
 
           <button
             type="button"
@@ -203,28 +193,10 @@ const AppContent: React.FC = () => {
                     >
                       Decrypt
                     </button>
-                    <button
-                      type="button"
-                      className={`sidebar-subitem ${activeTab === 'vault' ? 'active' : ''}`}
-                      onClick={() => handleTabClick('vault')}
-                    >
-                      Private Document Vault
-                    </button>
+                    
                   </div>
                 )}
               </div>
-
-              <button
-                type="button"
-                className={`sidebar-nav-item ${activeTab === 'vault' ? 'active' : ''}`}
-                onClick={() => handleTabClick('vault')}
-              >
-                <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <HardDrive size={17} />
-                  <span>Vault</span>
-                </span>
-                <span className="sidebar-badge">E2EE</span>
-              </button>
 
               <button
                 type="button"
@@ -364,48 +336,10 @@ const AppContent: React.FC = () => {
                   <span>Decrypt</span>
                 </button>
 
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={activeTab === 'vault'}
-                  className="tab-btn"
-                  style={{
-                    borderRadius: 'var(--sb-radius-pill)',
-                    padding: '8px 16px',
-                    border: activeTab === 'vault' ? '1px solid var(--sb-border)' : '1px solid transparent',
-                  }}
-                  onClick={() => handleTabClick('vault')}
-                >
-                  <HardDrive size={15} aria-hidden="true" />
-                  <span>
-                    Private Document Vault {!user && <span style={{ fontSize: '0.6875rem', opacity: 0.7 }}>(Account Required)</span>}
-                  </span>
-                </button>
+                
               </nav>
 
-              {user ? (
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={async () => {
-                    await logout();
-                    if (activeTab === 'vault') setActiveTab('encrypt');
-                  }}
-                  title="Log Out"
-                >
-                  <LogOut size={14} aria-hidden="true" />
-                  <span>Log Out</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  onClick={() => handleOpenAuth('register')}
-                >
-                  <UserPlus size={14} aria-hidden="true" />
-                  <span>Register</span>
-                </button>
-              )}
+             
             </div>
           </div>
 
