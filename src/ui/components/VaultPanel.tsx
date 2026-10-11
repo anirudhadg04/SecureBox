@@ -10,6 +10,8 @@ import {
   FolderArchive,
   ArrowUpDown,
   Lock,
+  Users,
+  Clock,
 } from 'lucide-react';
 import { api, VaultDocument, SharedDocumentItem } from '../../services/api';
 import { formatFileSize } from '../components/common/FileDropzone';
@@ -157,8 +159,53 @@ export const VaultPanel: React.FC = () => {
 
       {error && <Banner variant="error" title="Vault Notice">{error}</Banner>}
 
+      {/* Summary Section Metrics */}
+      <div className="vault-metrics-grid">
+        <div className="metric-card">
+          <div className="metric-icon-wrap">
+            <FileText size={20} aria-hidden="true" />
+          </div>
+          <div>
+            <div className="metric-label">Total Documents</div>
+            <div className="metric-value">{documents.length}</div>
+          </div>
+        </div>
+
+        <div className="metric-card">
+          <div className="metric-icon-wrap">
+            <HardDrive size={20} aria-hidden="true" />
+          </div>
+          <div>
+            <div className="metric-label">Storage Used</div>
+            <div className="metric-value">{formatFileSize(usageBytes)}</div>
+          </div>
+        </div>
+
+        <div className="metric-card">
+          <div className="metric-icon-wrap">
+            <Users size={20} aria-hidden="true" />
+          </div>
+          <div>
+            <div className="metric-label">Shared With Me</div>
+            <div className="metric-value">{sharedWithMe.length}</div>
+          </div>
+        </div>
+
+        <div className="metric-card">
+          <div className="metric-icon-wrap">
+            <Clock size={20} aria-hidden="true" />
+          </div>
+          <div>
+            <div className="metric-label">Recent Updates</div>
+            <div className="metric-value" style={{ fontSize: '0.95rem', fontWeight: 600 }}>
+              {documents.length > 0 ? new Date(documents[0].created_at).toLocaleDateString() : 'None'}
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Tabs between My Vault and Shared With Me */}
-      <div className="vault-tabs" style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border-subtle)', marginBottom: '16px' }}>
+      <div className="vault-tabs" style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--sb-border)', marginBottom: '16px' }}>
         <button
           type="button"
           className={`tab-btn ${activeTab === 'mine' ? 'active' : ''}`}

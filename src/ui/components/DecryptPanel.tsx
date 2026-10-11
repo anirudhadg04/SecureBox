@@ -79,7 +79,7 @@ export const DecryptPanel: React.FC = () => {
   return (
     <div className="panel-card">
       <div className="panel-header">
-        <h2 className="panel-title">Decrypt Document or Archive</h2>
+        <h2 className="panel-title">Decrypt documents</h2>
         <p className="panel-subtitle">
           Decrypt single files or multi-file archives locally with your 256-bit key.
         </p>
@@ -99,7 +99,7 @@ export const DecryptPanel: React.FC = () => {
             onClear={() => setFile(null)}
             accept=".sbox"
             label="Select .sbox file"
-            hint="Choose an encrypted SecureBox (.sbox) document or archive"
+            hint="Drag & drop or click to select .sbox file"
             disabled={status === 'processing'}
           />
 
@@ -296,3 +296,5 @@ export const DecryptPanel: React.FC = () => {
     </div>
   );
 };
+
+

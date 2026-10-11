@@ -46,9 +46,9 @@ const AppContent: React.FC = () => {
           {/* Top Left: Brand and (if logged in) User Profile */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
             <div className="brand-row">
-              <Shield size={28} aria-hidden="true" color="var(--border-focus)" />
+              <Shield size={28} aria-hidden="true" color="var(--sb-primary)" />
               <h1 className="brand-title">SecureBox</h1>
-              <span className="brand-badge">Client-Side Only</span>
+              <span className="brand-badge">Client-Side Encryption</span>
             </div>
 
             {user && (
@@ -58,7 +58,7 @@ const AppContent: React.FC = () => {
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '8px',
-                  padding: '4px 12px',
+                  padding: '2px 8px',
                   background: 'var(--bg-card)',
                   border: '1px solid var(--border-subtle)',
                   borderRadius: '9999px',
@@ -75,16 +75,16 @@ const AppContent: React.FC = () => {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    fontSize: '0.75rem',
+                    fontSize: '0.6875rem',
                     fontWeight: 700,
                   }}
                 >
                   {user.username.charAt(0).toUpperCase()}
                 </div>
-                <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)' }}>
                   {user.username}
                 </span>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>({user.email})</span>
+                <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>({user.email})</span>
               </div>
             )}
           </div>
@@ -127,7 +127,7 @@ const AppContent: React.FC = () => {
         </div>
 
         <p className="app-description">
-          Local document encryption and cryptographic protection. Plaintext and keys never leave your device.
+          Zero-knowledge document encryption. Your data stays private.
         </p>
       </header>
 
@@ -170,7 +170,7 @@ const AppContent: React.FC = () => {
             onClick={() => handleTabClick('vault')}
           >
             <HardDrive size={16} aria-hidden="true" />
-            <span>Private Document Vault {!user && <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>(Account Required)</span>}</span>
+            <span>Private Document Vault {!user && <span style={{ fontSize: '0.6875rem', opacity: 0.7 }}>(Account Required)</span>}</span>
           </button>
         </nav>
 

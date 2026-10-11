@@ -22,6 +22,10 @@ export function createApp(): express.Express {
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('X-XSS-Protection', '1; mode=block');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    // HSTS for production (1 year including subdomains)
+    if (process.env.NODE_ENV === 'production') {
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
     next();
   });
 
@@ -59,6 +63,6 @@ if (process.env.NODE_ENV !== 'test') {
   const port = process.env.PORT || 3001;
   const app = createApp();
   app.listen(port, () => {
-    console.log(`[SecureBox] Server running on port ${port}`);
+    console.log('[SecureBox] Server running on port ' + port + '');
   });
 }

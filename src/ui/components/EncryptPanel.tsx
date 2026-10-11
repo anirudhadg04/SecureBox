@@ -201,9 +201,9 @@ export const EncryptPanel: React.FC<EncryptPanelProps> = ({ onRequireRegister })
   return (
     <div className="panel-card">
       <div className="panel-header">
-        <h2 className="panel-title">Encrypt Document or Collection</h2>
+        <h2 className="panel-title">Encrypt documents</h2>
         <p className="panel-subtitle">
-          Encrypt single or multiple files into a tamper-proof <code>.sbox</code> container using AES-256-GCM.
+          Encrypt single files or collections into an authenticated <code>.sbox</code> container using AES-256-GCM.
         </p>
       </div>
 
@@ -219,7 +219,7 @@ export const EncryptPanel: React.FC<EncryptPanelProps> = ({ onRequireRegister })
             onFilesSelect={handleFilesSelect}
             multiple={true}
             label="Select file(s) to encrypt"
-            hint="Drag & drop single or multiple files, or click to browse (100% client-side)"
+            hint="Drag & drop or click to select files"
             disabled={status === 'processing'}
           />
 
@@ -480,3 +480,6 @@ export const EncryptPanel: React.FC<EncryptPanelProps> = ({ onRequireRegister })
     </div>
   );
 };
+
+
+
