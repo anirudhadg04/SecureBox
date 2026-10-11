@@ -10,8 +10,6 @@ import {
   FolderArchive,
   ArrowUpDown,
   Lock,
-  Users,
-  Clock,
 } from 'lucide-react';
 import { api, VaultDocument, SharedDocumentItem } from '../../services/api';
 import { formatFileSize } from '../components/common/FileDropzone';
@@ -159,46 +157,90 @@ export const VaultPanel: React.FC = () => {
 
       {error && <Banner variant="error" title="Vault Notice">{error}</Banner>}
 
-      {/* Summary Section Metrics */}
-      <div className="vault-metrics-grid">
-        <div className="metric-card">
-          <div className="metric-icon-wrap">
-            <FileText size={20} aria-hidden="true" />
+      {/* Reference UI 3-Column Glass Stat Cards Row */}
+      <div className="reference-metrics-row">
+        {/* Card 1: User Profile Welcome */}
+        <div className="glass-stat-card">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '8px' }}>
+            <div
+              style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '50%',
+                background: 'var(--sb-primary)',
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '1rem',
+                fontWeight: 700,
+                boxShadow: '0 4px 10px rgba(29, 114, 254, 0.25)',
+              }}
+            >
+              {user ? user.username.slice(0, 2).toUpperCase() : 'SB'}
+            </div>
+            <div>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--sb-text)', lineHeight: 1.2 }}>
+                Hello {user ? user.username : 'User'}
+              </div>
+              <div style={{ fontSize: '0.8125rem', color: 'var(--sb-text-secondary)', marginTop: '2px' }}>
+                {documents.length} secure documents in vault
+              </div>
+            </div>
           </div>
-          <div>
-            <div className="metric-label">Total Documents</div>
-            <div className="metric-value">{documents.length}</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--sb-text-muted)' }}>
+            E2EE Zero-Knowledge Sandbox
           </div>
         </div>
 
-        <div className="metric-card">
-          <div className="metric-icon-wrap">
-            <HardDrive size={20} aria-hidden="true" />
+        {/* Card 2: Documents Metric with Green Sparkline */}
+        <div className="glass-stat-card">
+          <div className="stat-card-header">
+            <span className="stat-card-title">TOTAL DOCUMENTS</span>
           </div>
-          <div>
-            <div className="metric-label">Storage Used</div>
-            <div className="metric-value">{formatFileSize(usageBytes)}</div>
+          <div className="stat-card-body">
+            <div>
+              <div className="stat-card-num">{documents.length}</div>
+              <div className="stat-card-sub">Active encrypted files</div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+              <svg className="stat-sparkline" viewBox="0 0 80 34" fill="none">
+                <path
+                  d="M2 28 C 15 26, 25 22, 38 18 C 50 14, 62 6, 78 4"
+                  stroke="#16a34a"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+              <div className="stat-trend positive">
+                <span>+100% verified</span>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="metric-card">
-          <div className="metric-icon-wrap">
-            <Users size={20} aria-hidden="true" />
+        {/* Card 3: Storage Used Metric with Red/Pink Trend Sparkline */}
+        <div className="glass-stat-card">
+          <div className="stat-card-header">
+            <span className="stat-card-title">STORAGE USED</span>
           </div>
-          <div>
-            <div className="metric-label">Shared With Me</div>
-            <div className="metric-value">{sharedWithMe.length}</div>
-          </div>
-        </div>
-
-        <div className="metric-card">
-          <div className="metric-icon-wrap">
-            <Clock size={20} aria-hidden="true" />
-          </div>
-          <div>
-            <div className="metric-label">Recent Updates</div>
-            <div className="metric-value" style={{ fontSize: '0.95rem', fontWeight: 600 }}>
-              {documents.length > 0 ? new Date(documents[0].created_at).toLocaleDateString() : 'None'}
+          <div className="stat-card-body">
+            <div>
+              <div className="stat-card-num" style={{ fontSize: '1.75rem' }}>{formatFileSize(usageBytes)}</div>
+              <div className="stat-card-sub">of {formatFileSize(quotaBytes)} quota</div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+              <svg className="stat-sparkline" viewBox="0 0 80 34" fill="none">
+                <path
+                  d="M2 8 C 15 16, 28 24, 42 12 C 55 2, 68 28, 78 14"
+                  stroke="#ef4444"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+              <div className="stat-trend negative">
+                <span>{percentUsed}% capacity</span>
+              </div>
             </div>
           </div>
         </div>
@@ -303,9 +345,9 @@ export const VaultPanel: React.FC = () => {
                       </td>
                       <td style={{ padding: '12px' }}>
                         {doc.active_shares_count && doc.active_shares_count > 0 ? (
-                          <span className="badge-shared">{doc.active_shares_count} shared</span>
+                          <span className="priority-pill medium">{doc.active_shares_count} shared</span>
                         ) : (
-                          <span style={{ color: 'var(--text-muted)' }}>Private</span>
+                          <span className="priority-pill low">Encrypted</span>
                         )}
                       </td>
                       <td style={{ padding: '12px', textAlign: 'right' }}>
