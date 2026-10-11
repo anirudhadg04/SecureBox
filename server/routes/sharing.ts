@@ -215,6 +215,43 @@ sharingRouter.get('/shared-with-me', requireAuth, (req: AuthenticatedRequest, re
 });
 
 /**
+ * GET /api/sharing/shared-by-me
+ * Lists documents shared by the authenticated user to other users.
+ */
+sharingRouter.get('/shared-by-me', requireAuth, (req: AuthenticatedRequest, res: Response): void => {
+  const userId = req.user!.id;
+  const db = getDatabase();
+
+  const shares = db.prepare(`
+    SELECT 
+      s.id AS share_id, s.document_id, s.status, s.permission,
+      s.created_at AS shared_at,
+      u.username AS recipient_username,
+      d.name AS document_name, d.ciphertext_size, d.plaintext_size, d.mime_type, d.format_version, d.file_count
+    FROM document_shares s
+    JOIN documents d ON s.document_id = d.id
+    JOIN users u ON s.recipient_id = u.id
+    WHERE s.sender_id = ?
+    ORDER BY s.created_at DESC
+  `).all(userId) as Array<{
+    share_id: string;
+    document_id: string;
+    status: string;
+    permission: string;
+    shared_at: number;
+    recipient_username: string;
+    document_name: string;
+    ciphertext_size: number;
+    plaintext_size: number;
+    mime_type: string;
+    format_version: number;
+    file_count: number;
+  }>;
+
+  res.json({ shares });
+});
+
+/**
  * POST /api/sharing/revoke
  * Revokes an existing document share.
  */

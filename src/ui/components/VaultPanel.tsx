@@ -11,7 +11,7 @@ import {
   ArrowUpDown,
   Lock,
 } from 'lucide-react';
-import { api, VaultDocument, SharedDocumentItem } from '../../services/api';
+import { api, VaultDocument, SharedDocumentItem, SharedByMeDocumentItem } from '../../services/api';
 import { formatFileSize } from '../components/common/FileDropzone';
 import { Banner } from '../components/common/Banner';
 import { ShareModal } from './ShareModal';
@@ -19,19 +19,40 @@ import { useAuth } from '../context/AuthContext';
 import { unwrapKeyAsRecipient } from '../../core/crypto/sharingKeyUtils';
 import { bytesToHex } from '../../core/crypto/keyUtils';
 
-export const VaultPanel: React.FC = () => {
+export interface VaultPanelProps {
+  externalSearchQuery?: string;
+  collaboratorFilter?: string | null;
+  onClearCollaboratorFilter?: () => void;
+  vaultTab?: 'mine' | 'shared-with-me' | 'shared-by-me';
+  onVaultTabChange?: (tab: 'mine' | 'shared-with-me' | 'shared-by-me') => void;
+}
+
+export const VaultPanel: React.FC<VaultPanelProps> = ({
+  externalSearchQuery = '',
+  collaboratorFilter = null,
+  onClearCollaboratorFilter,
+  vaultTab = 'mine',
+  onVaultTabChange,
+}) => {
   const [documents, setDocuments] = useState<VaultDocument[]>([]);
   const [sharedWithMe, setSharedWithMe] = useState<SharedDocumentItem[]>([]);
+  const [sharedByMe, setSharedByMe] = useState<SharedByMeDocumentItem[]>([]);
   const [usageBytes, setUsageBytes] = useState<number>(0);
   const [quotaBytes, setQuotaBytes] = useState<number>(104857600);
 
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [localSearchQuery, setLocalSearchQuery] = useState<string>('');
   const [sortField, setSortField] = useState<'name' | 'created_at' | 'ciphertext_size'>('created_at');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
 
-  const [activeTab, setActiveTab] = useState<'mine' | 'shared'>('mine');
+  const [internalTab, setInternalTab] = useState<'mine' | 'shared-with-me' | 'shared-by-me'>('mine');
+  const activeTab = vaultTab || internalTab;
+  const setActiveTab = (tab: 'mine' | 'shared-with-me' | 'shared-by-me') => {
+    setInternalTab(tab);
+    if (onVaultTabChange) onVaultTabChange(tab);
+  };
+
   const [sharingDoc, setSharingDoc] = useState<VaultDocument | null>(null);
 
   // Unwrapped key helper state for shared items
@@ -44,14 +65,16 @@ export const VaultPanel: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const [docsRes, sharedRes] = await Promise.all([
+      const [docsRes, sharedWithRes, sharedByRes] = await Promise.all([
         api.listDocuments(),
         api.listSharedWithMe(),
+        api.listSharedByMe().catch(() => ({ shares: [] })),
       ]);
       setDocuments(docsRes.documents);
       setUsageBytes(docsRes.usageBytes);
       setQuotaBytes(docsRes.quotaBytes);
-      setSharedWithMe(sharedRes.shares);
+      setSharedWithMe(sharedWithRes.shares);
+      setSharedByMe(sharedByRes.shares);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load vault items.');
     } finally {
@@ -112,8 +135,15 @@ export const VaultPanel: React.FC = () => {
     }
   };
 
+  const effectiveSearchQuery = (externalSearchQuery || localSearchQuery).trim().toLowerCase();
+
   const filteredDocs = documents
-    .filter((d) => d.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    .filter((d) => {
+      if (!effectiveSearchQuery) return true;
+      const matchName = d.name.toLowerCase().includes(effectiveSearchQuery);
+      const matchFormat = (d.format_version === 2 ? 'archive' : 'single file').includes(effectiveSearchQuery);
+      return matchName || matchFormat;
+    })
     .sort((a, b) => {
       let valA = a[sortField];
       let valB = b[sortField];
@@ -125,6 +155,26 @@ export const VaultPanel: React.FC = () => {
       if (valA > valB) return sortAsc ? 1 : -1;
       return 0;
     });
+
+  const filteredSharedWithMe = sharedWithMe.filter((s) => {
+    if (collaboratorFilter && s.sender_username.toLowerCase() !== collaboratorFilter.toLowerCase()) {
+      return false;
+    }
+    if (!effectiveSearchQuery) return true;
+    const matchDoc = s.document_name.toLowerCase().includes(effectiveSearchQuery);
+    const matchSender = s.sender_username.toLowerCase().includes(effectiveSearchQuery);
+    return matchDoc || matchSender;
+  });
+
+  const filteredSharedByMe = sharedByMe.filter((s) => {
+    if (collaboratorFilter && s.recipient_username.toLowerCase() !== collaboratorFilter.toLowerCase()) {
+      return false;
+    }
+    if (!effectiveSearchQuery) return true;
+    const matchDoc = s.document_name.toLowerCase().includes(effectiveSearchQuery);
+    const matchRecipient = s.recipient_username.toLowerCase().includes(effectiveSearchQuery);
+    return matchDoc || matchRecipient;
+  });
 
   const percentUsed = Math.min(100, Math.round((usageBytes / quotaBytes) * 100));
 
@@ -157,9 +207,39 @@ export const VaultPanel: React.FC = () => {
 
       {error && <Banner variant="error" title="Vault Notice">{error}</Banner>}
 
-      {/* Reference UI 3-Column Glass Stat Cards Row */}
+      {collaboratorFilter && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '8px 14px',
+            marginBottom: '16px',
+            background: 'rgba(224, 242, 254, 0.7)',
+            borderRadius: 'var(--sb-radius-sm)',
+            border: '1px solid var(--sb-border-focus)',
+            fontSize: '0.8125rem',
+          }}
+        >
+          <span>
+            Filtering records by collaborator: <strong>@{collaboratorFilter}</strong>
+          </span>
+          {onClearCollaboratorFilter && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={onClearCollaboratorFilter}
+              style={{ padding: '2px 8px', fontSize: '0.75rem' }}
+            >
+              Clear Filter
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Clean, Data-Backed Stat Cards (No Fake Sparklines) */}
       <div className="reference-metrics-row">
-        {/* Card 1: User Profile Welcome */}
+        {/* Card 1: User Profile & Security Guarantee */}
         <div className="glass-stat-card">
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '8px' }}>
             <div
@@ -184,16 +264,16 @@ export const VaultPanel: React.FC = () => {
                 Hello {user ? user.username : 'User'}
               </div>
               <div style={{ fontSize: '0.8125rem', color: 'var(--sb-text-secondary)', marginTop: '2px' }}>
-                {documents.length} secure documents in vault
+                {documents.length} encrypted vault items
               </div>
             </div>
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--sb-text-muted)' }}>
-            E2EE Zero-Knowledge Sandbox
+            E2EE Client-Side Storage
           </div>
         </div>
 
-        {/* Card 2: Documents Metric with Green Sparkline */}
+        {/* Card 2: Vault Documents Metric */}
         <div className="glass-stat-card">
           <div className="stat-card-header">
             <span className="stat-card-title">TOTAL DOCUMENTS</span>
@@ -203,23 +283,18 @@ export const VaultPanel: React.FC = () => {
               <div className="stat-card-num">{documents.length}</div>
               <div className="stat-card-sub">Active encrypted files</div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-              <svg className="stat-sparkline" viewBox="0 0 80 34" fill="none">
-                <path
-                  d="M2 28 C 15 26, 25 22, 38 18 C 50 14, 62 6, 78 4"
-                  stroke="#16a34a"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-              <div className="stat-trend positive">
-                <span>+100% verified</span>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#16a34a' }}>
+                AES-256-GCM
+              </div>
+              <div style={{ fontSize: '0.6875rem', color: 'var(--sb-text-muted)' }}>
+                Authenticated
               </div>
             </div>
           </div>
         </div>
 
-        {/* Card 3: Storage Used Metric with Red/Pink Trend Sparkline */}
+        {/* Card 3: Storage Used Metric */}
         <div className="glass-stat-card">
           <div className="stat-card-header">
             <span className="stat-card-title">STORAGE USED</span>
@@ -229,24 +304,19 @@ export const VaultPanel: React.FC = () => {
               <div className="stat-card-num" style={{ fontSize: '1.75rem' }}>{formatFileSize(usageBytes)}</div>
               <div className="stat-card-sub">of {formatFileSize(quotaBytes)} quota</div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-              <svg className="stat-sparkline" viewBox="0 0 80 34" fill="none">
-                <path
-                  d="M2 8 C 15 16, 28 24, 42 12 C 55 2, 68 28, 78 14"
-                  stroke="#ef4444"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-              <div className="stat-trend negative">
-                <span>{percentUsed}% capacity</span>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: percentUsed > 80 ? '#dc2626' : 'var(--sb-text)' }}>
+                {percentUsed}%
+              </div>
+              <div style={{ fontSize: '0.6875rem', color: 'var(--sb-text-muted)' }}>
+                Quota used
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Tabs between My Vault and Shared With Me */}
+      {/* Tabs between My Vault, Shared With Me, and Shared By Me */}
       <div className="vault-tabs" style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--sb-border)', marginBottom: '16px' }}>
         <button
           type="button"
@@ -258,17 +328,25 @@ export const VaultPanel: React.FC = () => {
         </button>
         <button
           type="button"
-          className={`tab-btn ${activeTab === 'shared' ? 'active' : ''}`}
-          onClick={() => setActiveTab('shared')}
-          style={{ borderBottom: activeTab === 'shared' ? '2px solid var(--text-primary)' : '2px solid transparent' }}
+          className={`tab-btn ${activeTab === 'shared-with-me' ? 'active' : ''}`}
+          onClick={() => setActiveTab('shared-with-me')}
+          style={{ borderBottom: activeTab === 'shared-with-me' ? '2px solid var(--text-primary)' : '2px solid transparent' }}
         >
           <span>Shared With Me ({sharedWithMe.length})</span>
+        </button>
+        <button
+          type="button"
+          className={`tab-btn ${activeTab === 'shared-by-me' ? 'active' : ''}`}
+          onClick={() => setActiveTab('shared-by-me')}
+          style={{ borderBottom: activeTab === 'shared-by-me' ? '2px solid var(--text-primary)' : '2px solid transparent' }}
+        >
+          <span>Shared By Me ({sharedByMe.length})</span>
         </button>
       </div>
 
       {activeTab === 'mine' && (
         <div>
-          {/* Search and Sort Toolbar */}
+          {/* Sort Toolbar */}
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
             <div style={{ position: 'relative', flex: '1', minWidth: '220px' }}>
               <Search size={16} style={{ position: 'absolute', left: '10px', top: '10px', color: 'var(--text-muted)' }} />
@@ -276,9 +354,9 @@ export const VaultPanel: React.FC = () => {
                 type="text"
                 className="form-input"
                 style={{ paddingLeft: '32px' }}
-                placeholder="Search documents..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search documents by name or format..."
+                value={externalSearchQuery ? externalSearchQuery : localSearchQuery}
+                onChange={(e) => setLocalSearchQuery(e.target.value)}
               />
             </div>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -303,10 +381,16 @@ export const VaultPanel: React.FC = () => {
           {filteredDocs.length === 0 ? (
             <div className="empty-vault-state" style={{ textAlign: 'center', padding: '40px 16px', color: 'var(--text-muted)' }}>
               <Lock size={36} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
-              <p>No documents found in your private vault.</p>
-              <p style={{ fontSize: '0.8125rem', marginTop: '4px' }}>
-                Use the Encrypt workspace above to encrypt and store documents in SecureBox.
-              </p>
+              {effectiveSearchQuery ? (
+                <p>No documents match your search &quot;{effectiveSearchQuery}&quot;.</p>
+              ) : (
+                <>
+                  <p>No documents found in your private vault.</p>
+                  <p style={{ fontSize: '0.8125rem', marginTop: '4px' }}>
+                    Use the Encrypt workspace above to encrypt and store documents in SecureBox.
+                  </p>
+                </>
+              )}
             </div>
           ) : (
             <div className="vault-table-wrapper" style={{ overflowX: 'auto' }}>
@@ -388,12 +472,16 @@ export const VaultPanel: React.FC = () => {
         </div>
       )}
 
-      {activeTab === 'shared' && (
+      {activeTab === 'shared-with-me' && (
         <div>
-          {sharedWithMe.length === 0 ? (
+          {filteredSharedWithMe.length === 0 ? (
             <div className="empty-vault-state" style={{ textAlign: 'center', padding: '40px 16px', color: 'var(--text-muted)' }}>
               <Share2 size={36} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
-              <p>No documents have been shared with you yet.</p>
+              {effectiveSearchQuery || collaboratorFilter ? (
+                <p>No incoming shared documents match your filter.</p>
+              ) : (
+                <p>No documents have been shared with you yet.</p>
+              )}
             </div>
           ) : (
             <div className="vault-table-wrapper" style={{ overflowX: 'auto' }}>
@@ -409,7 +497,7 @@ export const VaultPanel: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {sharedWithMe.map((item) => {
+                  {filteredSharedWithMe.map((item) => {
                     const keyHex = unwrappedKeys[item.share_id];
                     return (
                       <tr key={item.share_id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
@@ -449,6 +537,54 @@ export const VaultPanel: React.FC = () => {
                       </tr>
                     );
                   })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'shared-by-me' && (
+        <div>
+          {filteredSharedByMe.length === 0 ? (
+            <div className="empty-vault-state" style={{ textAlign: 'center', padding: '40px 16px', color: 'var(--text-muted)' }}>
+              <Share2 size={36} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
+              {effectiveSearchQuery || collaboratorFilter ? (
+                <p>No outgoing shared documents match your filter.</p>
+              ) : (
+                <p>You have not shared any documents with others yet.</p>
+              )}
+            </div>
+          ) : (
+            <div className="vault-table-wrapper" style={{ overflowX: 'auto' }}>
+              <table className="vault-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: 'var(--text-secondary)' }}>
+                    <th style={{ padding: '10px 12px' }}>Document Name</th>
+                    <th style={{ padding: '10px 12px' }}>Recipient</th>
+                    <th style={{ padding: '10px 12px' }}>Status</th>
+                    <th style={{ padding: '10px 12px' }}>Permission</th>
+                    <th style={{ padding: '10px 12px' }}>Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredSharedByMe.map((item) => (
+                    <tr key={item.share_id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                      <td style={{ padding: '12px', fontWeight: 500 }}>{item.document_name}</td>
+                      <td style={{ padding: '12px', color: 'var(--border-focus)' }}>@{item.recipient_username}</td>
+                      <td style={{ padding: '12px' }}>
+                        <span className={`priority-pill ${item.status === 'active' ? 'low' : 'high'}`}>
+                          {item.status}
+                        </span>
+                      </td>
+                      <td style={{ padding: '12px', textTransform: 'capitalize', color: 'var(--text-secondary)' }}>
+                        {item.permission || 'read'}
+                      </td>
+                      <td style={{ padding: '12px', color: 'var(--text-secondary)' }}>
+                        {new Date(item.shared_at).toLocaleDateString()}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>

@@ -36,6 +36,21 @@ export interface SharedDocumentItem {
   file_count: number;
 }
 
+export interface SharedByMeDocumentItem {
+  share_id: string;
+  document_id: string;
+  status: string;
+  permission: string;
+  shared_at: number;
+  recipient_username: string;
+  document_name: string;
+  ciphertext_size: number;
+  plaintext_size: number;
+  mime_type: string;
+  format_version: number;
+  file_count: number;
+}
+
 class ApiService {
   private csrfToken: string | null = null;
 
@@ -191,6 +206,10 @@ class ApiService {
 
   async listSharedWithMe(): Promise<{ shares: SharedDocumentItem[] }> {
     return this.request('/api/sharing/shared-with-me');
+  }
+
+  async listSharedByMe(): Promise<{ shares: SharedByMeDocumentItem[] }> {
+    return this.request('/api/sharing/shared-by-me');
   }
 
   async revokeShare(shareId: string): Promise<{ message: string }> {

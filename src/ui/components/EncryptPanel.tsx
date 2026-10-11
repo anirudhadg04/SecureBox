@@ -12,9 +12,10 @@ import { SendDecryptionKeyModal } from './SendDecryptionKeyModal';
 
 interface EncryptPanelProps {
   onRequireRegister?: () => void;
+  searchFilter?: string;
 }
 
-export const EncryptPanel: React.FC<EncryptPanelProps> = ({ onRequireRegister }) => {
+export const EncryptPanel: React.FC<EncryptPanelProps> = ({ onRequireRegister, searchFilter = '' }) => {
   const [files, setFiles] = useState<File[]>([]);
   const [archiveName, setArchiveName] = useState<string>('securebox-archive');
   const [status, setStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
@@ -274,29 +275,44 @@ export const EncryptPanel: React.FC<EncryptPanelProps> = ({ onRequireRegister })
               )}
 
               {/* Selected Files List */}
-              <div
-                style={{
-                  maxHeight: '220px',
-                  overflowY: 'auto',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-md)',
-                  marginBottom: '16px',
-                }}
-                role="region"
-                aria-label="List of selected files"
-              >
-                {files.map((f, idx) => (
+              {(() => {
+                const query = searchFilter.trim().toLowerCase();
+                const displayedFiles = files
+                  .map((f, originalIndex) => ({ f, originalIndex }))
+                  .filter(({ f }) => !query || f.name.toLowerCase().includes(query));
+
+                if (displayedFiles.length === 0 && files.length > 0) {
+                  return (
+                    <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+                      No selected files match &quot;{searchFilter}&quot;.
+                    </div>
+                  );
+                }
+
+                return (
                   <div
-                    key={`${f.name}-${idx}`}
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '8px 12px',
-                      borderBottom: idx < files.length - 1 ? '1px solid var(--border-subtle)' : 'none',
-                      backgroundColor: idx % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-subtle)',
+                      maxHeight: '220px',
+                      overflowY: 'auto',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-md)',
+                      marginBottom: '16px',
                     }}
+                    role="region"
+                    aria-label="List of selected files"
                   >
+                    {displayedFiles.map(({ f, originalIndex }, idx) => (
+                      <div
+                        key={`${f.name}-${originalIndex}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '8px 12px',
+                          borderBottom: idx < displayedFiles.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+                          backgroundColor: idx % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-subtle)',
+                        }}
+                      >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
                       <FileIcon size={16} aria-hidden="true" style={{ flexShrink: 0 }} />
                       <span
@@ -318,7 +334,7 @@ export const EncryptPanel: React.FC<EncryptPanelProps> = ({ onRequireRegister })
                     <button
                       type="button"
                       className="btn btn-secondary btn-sm"
-                      onClick={() => handleRemoveFile(idx)}
+                      onClick={() => handleRemoveFile(originalIndex)}
                       disabled={status === 'processing'}
                       aria-label={`Remove ${f.name}`}
                       style={{ padding: '2px 6px', height: '24px' }}
@@ -328,6 +344,8 @@ export const EncryptPanel: React.FC<EncryptPanelProps> = ({ onRequireRegister })
                   </div>
                 ))}
               </div>
+            );
+          })()}
 
               {totalSize > 250 * 1024 * 1024 && (
                 <Banner variant="warning" title="Memory Warning">
