@@ -5,7 +5,11 @@ import { parseKeyFromInput } from '../../core/crypto/keyUtils';
 import { FileDropzone, formatFileSize } from './common/FileDropzone';
 import { Banner } from './common/Banner';
 
-export const DecryptPanel: React.FC = () => {
+interface DecryptPanelProps {
+  searchFilter?: string;
+}
+
+export const DecryptPanel: React.FC<DecryptPanelProps> = ({ searchFilter = '' }) => {
   const [file, setFile] = useState<File | null>(null);
   const [keyInput, setKeyInput] = useState<string>('');
   const [status, setStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
@@ -202,63 +206,89 @@ export const DecryptPanel: React.FC = () => {
                 <div style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: '8px' }}>
                   Recovered Files ({decryptedResult.files.length}):
                 </div>
-                <div
-                  style={{
-                    maxHeight: '220px',
-                    overflowY: 'auto',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-md)',
-                  }}
-                  role="region"
-                  aria-label="List of recovered files"
-                >
-                  {decryptedResult.files.map((rf, idx) => (
-                    <div
-                      key={`${rf.path}-${idx}`}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '8px 12px',
-                        borderBottom: idx < decryptedResult.files.length - 1 ? '1px solid var(--border-subtle)' : 'none',
-                        backgroundColor: idx % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-subtle)',
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-                        <FileText size={16} aria-hidden="true" style={{ flexShrink: 0 }} />
-                        <span
-                          style={{
-                            fontSize: '0.875rem',
-                            fontWeight: 500,
-                            textOverflow: 'ellipsis',
-                            overflow: 'hidden',
-                            whiteSpace: 'nowrap',
-                          }}
-                          title={rf.path}
-                        >
-                          {rf.path}
-                        </span>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', flexShrink: 0 }}>
-                          ({formatFileSize(rf.data.byteLength)})
-                        </span>
-                      </div>
-                      <span
+                {(() => {
+                  const query = searchFilter.trim().toLowerCase();
+                  const displayedFiles = decryptedResult.files.filter(
+                    (rf) => !query || rf.path.toLowerCase().includes(query)
+                  );
+
+                  if (displayedFiles.length === 0 && decryptedResult.files.length > 0) {
+                    return (
+                      <div
                         style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          fontSize: '0.75rem',
-                          color: 'var(--state-success-text)',
-                          fontWeight: 500,
-                          flexShrink: 0,
+                          padding: '24px 16px',
+                          textAlign: 'center',
+                          color: 'var(--text-muted)',
+                          fontSize: '0.875rem',
+                          border: '1px solid var(--border-subtle)',
+                          borderRadius: 'var(--radius-md)',
                         }}
                       >
-                        <CheckCircle2 size={12} aria-hidden="true" />
-                        <span>Verified</span>
-                      </span>
+                        No recovered files match &quot;{searchFilter}&quot;.
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div
+                      style={{
+                        maxHeight: '220px',
+                        overflowY: 'auto',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-md)',
+                      }}
+                      role="region"
+                      aria-label="List of recovered files"
+                    >
+                      {displayedFiles.map((rf, idx) => (
+                        <div
+                          key={`${rf.path}-${idx}`}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '8px 12px',
+                            borderBottom: idx < displayedFiles.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+                            backgroundColor: idx % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-subtle)',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                            <FileText size={16} aria-hidden="true" style={{ flexShrink: 0 }} />
+                            <span
+                              style={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                                textOverflow: 'ellipsis',
+                                overflow: 'hidden',
+                                whiteSpace: 'nowrap',
+                              }}
+                              title={rf.path}
+                            >
+                              {rf.path}
+                            </span>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', flexShrink: 0 }}>
+                              ({formatFileSize(rf.data.byteLength)})
+                            </span>
+                          </div>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              fontSize: '0.75rem',
+                              color: 'var(--state-success-text)',
+                              fontWeight: 500,
+                              flexShrink: 0,
+                            }}
+                          >
+                            <CheckCircle2 size={12} aria-hidden="true" />
+                            <span>Verified</span>
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  );
+                })()}
               </div>
 
               <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', margin: '20px 0' }}>

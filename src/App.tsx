@@ -648,7 +648,7 @@ const AppContent: React.FC = () => {
               />
             )}
 
-            {activeSection === 'decrypt' && <DecryptPanel />}
+            {activeSection === 'decrypt' && <DecryptPanel searchFilter={searchQuery} />}
 
             {activeSection === 'vault' && user && (
               <VaultPanel
