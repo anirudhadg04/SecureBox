@@ -93,4 +93,64 @@ describe('Server Authentication & Crypto Engine', () => {
     expect(db.prepare(`SELECT COUNT(*) AS count FROM sessions WHERE user_id = 'u1'`).get()).toEqual({ count: 0 });
     expect(db.prepare(`SELECT COUNT(*) AS count FROM documents WHERE owner_id = 'u1'`).get()).toEqual({ count: 0 });
   });
+
+  it('regression: login API creates valid session and returns structured JSON on success and safe errors on failure', async () => {
+    const { createApp } = await import('../../server');
+    const app = createApp();
+    const server = app.listen(0);
+    const port = (server.address() as any).port;
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    try {
+      // 1. Missing credentials returns 400
+      const missingRes = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      expect(missingRes.status).toBe(400);
+      const missingJson = await missingRes.json();
+      expect(missingJson.error).toBe('Invalid credentials.');
+
+      // 2. Non-existent user returns 401
+      const notFoundRes = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: 'nonexistent_user', password: 'Password123!' }),
+      });
+      expect(notFoundRes.status).toBe(401);
+      const notFoundJson = await notFoundRes.json();
+      expect(notFoundJson.error).toBe('Invalid username/email or password.');
+
+      // 3. Register user and login successfully
+      const uniqueUsername = `user_${Date.now()}`;
+      await fetch(`${baseUrl}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: uniqueUsername,
+          email: `${uniqueUsername}@test.com`,
+          password: 'Password123!',
+        }),
+      });
+
+      const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: uniqueUsername, password: 'Password123!' }),
+      });
+      expect(loginRes.status).toBe(200);
+      const loginJson = await loginRes.json();
+      expect(loginJson.user.username).toBe(uniqueUsername);
+      expect(loginJson.csrfToken).toBeDefined();
+      expect(loginRes.headers.get('set-cookie')).toContain('sbox_session=');
+
+      // 4. Safe error handling: verify responses never leak stack traces
+      expect(loginJson).not.toHaveProperty('stack');
+      expect(notFoundJson).not.toHaveProperty('stack');
+    } finally {
+      server.close();
+    }
+  });
 });
+

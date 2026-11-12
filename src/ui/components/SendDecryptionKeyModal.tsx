@@ -4,17 +4,32 @@ import { api } from '../../services/api';
 import { Banner } from '../components/common/Banner';
 import { wrapKeyForRecipient } from '../../core/crypto/sharingKeyUtils';
 import { parseKeyFromInput } from '../../core/crypto/keyUtils';
+import { computeSha256 } from '../../core/hashing/sha256';
 
 interface SendDecryptionKeyModalProps {
   documentName: string;
   keyHex: string;
+  docId: string | null;
+  encryptedSboxBytes?: Uint8Array | null;
+  plaintextSize?: number;
+  formatVersion?: number;
+  fileCount?: number;
+  onDocSavedToVault?: (id: string) => void;
   onClose: () => void;
+  onShareCreated?: () => void;
 }
 
 export const SendDecryptionKeyModal: React.FC<SendDecryptionKeyModalProps> = ({
   documentName,
   keyHex,
+  docId,
+  encryptedSboxBytes,
+  plaintextSize,
+  formatVersion,
+  fileCount,
+  onDocSavedToVault,
   onClose,
+  onShareCreated,
 }) => {
   const [recipientUsername, setRecipientUsername] = useState('');
   const [confirmedRecipient, setConfirmedRecipient] = useState<{
@@ -27,7 +42,7 @@ export const SendDecryptionKeyModal: React.FC<SendDecryptionKeyModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<boolean>(false);
 
-  // Look up recipient by username (similar to GitHub's collaborator add)
+  // Look up recipient by username (verifying backend identity and public key)
   const handleLookupRecipient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!recipientUsername.trim()) return;
@@ -52,12 +67,44 @@ export const SendDecryptionKeyModal: React.FC<SendDecryptionKeyModalProps> = ({
     setLoading(true);
 
     try {
+      let activeDocId = docId;
+
+      // Ensure document is persisted in the vault and uploaded to backend storage
+      if (!activeDocId) {
+        if (!encryptedSboxBytes) {
+          throw new Error('Encrypted document data not found in memory. Please save document to vault first.');
+        }
+
+        let binary = '';
+        for (let i = 0; i < encryptedSboxBytes.length; i++) {
+          binary += String.fromCharCode(encryptedSboxBytes[i]);
+        }
+        const b64 = btoa(binary);
+        const sha = await computeSha256(encryptedSboxBytes);
+
+        const uploadRes = await api.uploadDocument({
+          name: documentName,
+          ciphertextBase64: b64,
+          plaintextSize: plaintextSize || encryptedSboxBytes.length,
+          mimeType: 'application/octet-stream',
+          formatVersion: formatVersion || 1,
+          fileCount: fileCount || 1,
+          sha256Ciphertext: sha,
+          wrappedKeyOwner: keyHex.trim(),
+        });
+
+        activeDocId = uploadRes.id;
+        if (onDocSavedToVault) {
+          onDocSavedToVault(uploadRes.id);
+        }
+      }
+
       const cryptoKey = await parseKeyFromInput(keyHex.trim());
       const rawKeyBuffer = await crypto.subtle.exportKey('raw', cryptoKey);
       const rawKeyBytes = new Uint8Array(rawKeyBuffer);
 
-      // Context info bound to documentName and recipient
-      const contextInfo = `doc:${documentName}:recipient:${confirmedRecipient.userId}:v1`;
+      // Context info bound to actual document UUID and recipient user ID
+      const contextInfo = `doc:${activeDocId}:recipient:${confirmedRecipient.userId}:v1`;
 
       const { ephemeralPublicKeyJwk, wrappedKeyBase64 } = await wrapKeyForRecipient(
         rawKeyBytes,
@@ -65,20 +112,17 @@ export const SendDecryptionKeyModal: React.FC<SendDecryptionKeyModalProps> = ({
         contextInfo
       );
 
-      // We send the share with the ephemeral wrapped key
-      // If doc is not yet in vault table, we can register it or notify
-      try {
-        await api.shareDocument({
-          documentId: documentName,
-          recipientUsername: confirmedRecipient.username,
-          wrappedKeyRecipient: wrappedKeyBase64,
-          ephemeralPublicKeyJwk,
-        });
-      } catch {
-        // If the document wasn't pre-uploaded to vault, it still simulates/logs cleanly
-      }
+      await api.shareDocument({
+        documentId: activeDocId,
+        recipientUsername: confirmedRecipient.username,
+        wrappedKeyRecipient: wrappedKeyBase64,
+        ephemeralPublicKeyJwk,
+      });
 
       setSuccess(true);
+      if (onShareCreated) {
+        onShareCreated();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to wrap and send decryption key.');
     } finally {
@@ -125,7 +169,7 @@ export const SendDecryptionKeyModal: React.FC<SendDecryptionKeyModalProps> = ({
               <form onSubmit={handleLookupRecipient}>
                 <div className="form-group" style={{ marginBottom: '16px' }}>
                   <label className="form-label" htmlFor="collab-username-input">
-                    Search by username (GitHub style)
+                    Search by username
                   </label>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <input
@@ -133,7 +177,7 @@ export const SendDecryptionKeyModal: React.FC<SendDecryptionKeyModalProps> = ({
                       type="text"
                       required
                       className="form-input"
-                      placeholder="e.g. bob"
+                      placeholder=""
                       value={recipientUsername}
                       onChange={(e) => setRecipientUsername(e.target.value)}
                       disabled={loading}

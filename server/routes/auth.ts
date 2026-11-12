@@ -120,67 +120,71 @@ authRouter.post('/login', authLimiter, async (req: AuthenticatedRequest, res: Re
   const cleanIdentifier = identifier.trim().toLowerCase();
   const db = getDatabase();
 
-  const user = db.prepare(`
-    SELECT id, username, email, password_hash, password_salt, role, storage_quota_bytes
-    FROM users
-    WHERE lower(username) = ? OR lower(email) = ?
-  `).get(cleanIdentifier, cleanIdentifier) as {
-    id: string;
-    username: string;
-    email: string;
-    password_hash: string;
-    password_salt: string;
-    role: string;
-    storage_quota_bytes: number;
-  } | undefined;
+  try {
+    const user = db.prepare(`
+      SELECT id, username, email, password_hash, password_salt, role, storage_quota_bytes
+      FROM users
+      WHERE lower(username) = ? OR lower(email) = ?
+    `).get(cleanIdentifier, cleanIdentifier) as {
+      id: string;
+      username: string;
+      email: string;
+      password_hash: string;
+      password_salt: string;
+      role: string;
+      storage_quota_bytes: number;
+    } | undefined;
 
-  if (!user) {
-    // Always perform a dummy comparison to mitigate timing attacks
-    await verifyPassword(password, '00'.repeat(32), '00'.repeat(64));
-    res.status(401).json({ error: 'Invalid username/email or password.' });
-    return;
+    if (!user) {
+      // Always perform a dummy comparison to mitigate timing attacks
+      await verifyPassword(password, '00'.repeat(32), '00'.repeat(64));
+      res.status(401).json({ error: 'Invalid username/email or password.' });
+      return;
+    }
+
+    const isValid = await verifyPassword(password, user.password_salt, user.password_hash);
+    if (!isValid) {
+      res.status(401).json({ error: 'Invalid username/email or password.' });
+      return;
+    }
+
+    // Rotate session: generate fresh session token & CSRF token
+    const sessionToken = generateSecureToken();
+    const tokenHash = hashToken(sessionToken);
+    const csrfToken = generateSecureToken();
+    const sessionId = generateUuid();
+    const now = Date.now();
+
+    db.prepare(`
+      INSERT INTO sessions (id, user_id, session_token_hash, csrf_token, expires_at, created_at, last_active_at, ip_address, user_agent)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      sessionId,
+      user.id,
+      tokenHash,
+      csrfToken,
+      now + SESSION_MAX_AGE_MS,
+      now,
+      now,
+      req.ip || 'unknown',
+      req.headers['user-agent'] || 'unknown'
+    );
+
+    setSessionCookie(res, sessionToken);
+
+    res.json({
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        storageQuotaBytes: user.storage_quota_bytes,
+      },
+      csrfToken,
+    });
+  } catch {
+    res.status(500).json({ error: 'Internal authentication error. Please try again later.' });
   }
-
-  const isValid = await verifyPassword(password, user.password_salt, user.password_hash);
-  if (!isValid) {
-    res.status(401).json({ error: 'Invalid username/email or password.' });
-    return;
-  }
-
-  // Rotate session: generate fresh session token & CSRF token
-  const sessionToken = generateSecureToken();
-  const tokenHash = hashToken(sessionToken);
-  const csrfToken = generateSecureToken();
-  const sessionId = generateUuid();
-  const now = Date.now();
-
-  db.prepare(`
-    INSERT INTO sessions (id, user_id, session_token_hash, csrf_token, expires_at, created_at, last_active_at, ip_address, user_agent)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    sessionId,
-    user.id,
-    tokenHash,
-    csrfToken,
-    now + SESSION_MAX_AGE_MS,
-    now,
-    now,
-    req.ip || 'unknown',
-    req.headers['user-agent'] || 'unknown'
-  );
-
-  setSessionCookie(res, sessionToken);
-
-  res.json({
-    user: {
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      role: user.role,
-      storageQuotaBytes: user.storage_quota_bytes,
-    },
-    csrfToken,
-  });
 });
 
 /**

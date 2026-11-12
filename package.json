@@ -6,6 +6,7 @@
   "description": "Privacy-first, client-side document protection with authenticated AES-256-GCM encryption and SHA-256 integrity verification.",
   "scripts": {
     "dev": "vite",
+    "server": "tsx server/index.ts",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
@@ -30,6 +31,7 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "tsx": "^4.23.15",
     "typescript": "^5.6.3",
     "vite": "^5.4.11",
     "vitest": "^2.1.8"

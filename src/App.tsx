@@ -19,6 +19,7 @@ import { VaultPanel } from './ui/components/VaultPanel';
 import { AuthModal } from './ui/components/AuthModal';
 import { AuthProvider, useAuth } from './ui/context/AuthContext';
 import { api, SharedDocumentItem, SharedByMeDocumentItem } from './services/api';
+import { Banner } from './ui/components/common/Banner';
 
 export type NavigationSection =
   | 'encrypt'
@@ -47,29 +48,92 @@ const AppContent: React.FC = () => {
   const [sharedWithMeList, setSharedWithMeList] = useState<SharedDocumentItem[]>([]);
   const [sharedByMeList, setSharedByMeList] = useState<SharedByMeDocumentItem[]>([]);
 
-  const { user, logout } = useAuth();
+  const {
+    user,
+    isLoading,
+    isLoggingOut,
+    logout,
+    logoutNotice,
+    clearLogoutNotice,
+    sessionEpoch,
+  } = useAuth();
 
-  // Load real sharing records when authenticated
+  const userRef = useRef<typeof user>(user);
+  userRef.current = user;
+
+  // Reset transient filters and navigate away from protected views when session teardown occurs
   useEffect(() => {
-    let mounted = true;
-    if (user) {
-      Promise.all([
-        api.listSharedWithMe().catch(() => ({ shares: [] })),
-        api.listSharedByMe().catch(() => ({ shares: [] })),
-      ]).then(([inbound, outbound]) => {
-        if (!mounted) return;
-        setSharedWithMeList(inbound.shares || []);
-        setSharedByMeList(outbound.shares || []);
-      });
-    } else {
+    if (!user) {
+      if (
+        activeSection === 'vault' ||
+        activeSection === 'shared-with-me' ||
+        activeSection === 'shared-by-me'
+      ) {
+        setActiveSection('encrypt');
+      }
+    }
+    setSearchQuery('');
+    setSelectedCollaborator(null);
+  }, [user, sessionEpoch]);
+
+  // Load real sharing records when authenticated, update reactively on shares-updated event
+  const loadSharingData = React.useCallback(() => {
+    if (!user) {
       setSharedWithMeList([]);
       setSharedByMeList([]);
       setSelectedCollaborator(null);
+      return;
     }
-    return () => {
-      mounted = false;
-    };
+    Promise.all([
+      api.listSharedWithMe().catch(() => ({ shares: [] })),
+      api.listSharedByMe().catch(() => ({ shares: [] })),
+    ]).then(([inbound, outbound]) => {
+      if (!userRef.current) return;
+      setSharedWithMeList(inbound.shares || []);
+      setSharedByMeList(outbound.shares || []);
+    }).catch(() => {});
   }, [user]);
+
+  useEffect(() => {
+    loadSharingData();
+    window.addEventListener('securebox:shares-updated', loadSharingData);
+    return () => {
+      window.removeEventListener('securebox:shares-updated', loadSharingData);
+    };
+  }, [loadSharingData, sessionEpoch]);
+
+  // Browser History and bfcache protection: re-validate authentication on navigation
+  useEffect(() => {
+    const handleHistoryNav = async (e: Event) => {
+      const pageshowEvt = e as PageTransitionEvent;
+      if (pageshowEvt.persisted || e.type === 'popstate') {
+        try {
+          const { user: serverUser } = await api.getMe();
+          if (!serverUser && userRef.current) {
+            await logout();
+          }
+        } catch {
+          if (userRef.current) await logout();
+        }
+      }
+    };
+
+    window.addEventListener('popstate', handleHistoryNav);
+    window.addEventListener('pageshow', handleHistoryNav);
+
+    return () => {
+      window.removeEventListener('popstate', handleHistoryNav);
+      window.removeEventListener('pageshow', handleHistoryNav);
+    };
+  }, [logout]);
+
+  const handleLogout = async () => {
+    setShowAuthModal(false);
+    await logout();
+    setActiveSection('encrypt');
+    setSearchQuery('');
+    setSelectedCollaborator(null);
+  };
 
   // Derive real collaborators with deterministic avatars
   const realCollaborators = React.useMemo(() => {
@@ -176,6 +240,55 @@ const AppContent: React.FC = () => {
     }
     return colors[Math.abs(hash) % colors.length];
   };
+
+  // Render neutral loading/teardown screens to enforce rendering boundaries
+  if (isLoading) {
+    return (
+      <div className="app-viewport">
+        <div className="lava-lamp-bg" aria-hidden="true">
+          <div className="blob blob-1" />
+          <div className="blob blob-2" />
+        </div>
+        <div
+          className="glass-window"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '380px' }}
+        >
+          <div style={{ textAlign: 'center', padding: '40px' }}>
+            <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--sb-text)', marginBottom: '6px' }}>
+              Initializing SecureBox...
+            </div>
+            <p style={{ fontSize: '0.85rem', color: 'var(--sb-text-muted)' }}>
+              Validating secure cryptographic sandbox
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoggingOut) {
+    return (
+      <div className="app-viewport">
+        <div className="lava-lamp-bg" aria-hidden="true">
+          <div className="blob blob-1" />
+          <div className="blob blob-2" />
+        </div>
+        <div
+          className="glass-window"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '380px' }}
+        >
+          <div style={{ textAlign: 'center', padding: '40px' }}>
+            <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--sb-text)', marginBottom: '6px' }}>
+              Signing out securely...
+            </div>
+            <p style={{ fontSize: '0.85rem', color: 'var(--sb-text-muted)' }}>
+              Purging transient cryptographic keys and memory
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-viewport">
@@ -524,16 +637,7 @@ const AppContent: React.FC = () => {
                   type="button"
                   className="btn btn-secondary btn-sm"
                   style={{ width: '100%' }}
-                  onClick={async () => {
-                    await logout();
-                    if (
-                      activeSection === 'vault' ||
-                      activeSection === 'shared-with-me' ||
-                      activeSection === 'shared-by-me'
-                    ) {
-                      setActiveSection('encrypt');
-                    }
-                  }}
+                  onClick={handleLogout}
                 >
                   <LogOut size={14} aria-hidden="true" />
                   <span>Log Out</span>
@@ -602,16 +706,7 @@ const AppContent: React.FC = () => {
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
-                  onClick={async () => {
-                    await logout();
-                    if (
-                      activeSection === 'vault' ||
-                      activeSection === 'shared-with-me' ||
-                      activeSection === 'shared-by-me'
-                    ) {
-                      setActiveSection('encrypt');
-                    }
-                  }}
+                  onClick={handleLogout}
                   title="Log Out"
                 >
                   <LogOut size={14} aria-hidden="true" />
@@ -641,17 +736,48 @@ const AppContent: React.FC = () => {
 
           {/* Active View Display */}
           <section id={`panel-${activeSection}`} role="region">
+            {logoutNotice && (
+              <div style={{ marginBottom: '16px' }}>
+                <Banner variant="warning" title="Session Notice">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                    <span>{logoutNotice}</span>
+                    <button
+                      type="button"
+                      onClick={clearLogoutNotice}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: 'inherit',
+                        fontWeight: 600,
+                        padding: '2px 8px',
+                      }}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </Banner>
+              </div>
+            )}
+
             {activeSection === 'encrypt' && (
               <EncryptPanel
+                key={`encrypt-${sessionEpoch}-${user?.id || 'guest'}`}
                 onRequireRegister={() => handleOpenAuth('register')}
                 searchFilter={searchQuery}
               />
             )}
 
-            {activeSection === 'decrypt' && <DecryptPanel searchFilter={searchQuery} />}
+            {activeSection === 'decrypt' && (
+              <DecryptPanel
+                key={`decrypt-${sessionEpoch}-${user?.id || 'guest'}`}
+                searchFilter={searchQuery}
+              />
+            )}
 
             {activeSection === 'vault' && user && (
               <VaultPanel
+                key={`vault-${sessionEpoch}-${user.id}`}
                 externalSearchQuery={searchQuery}
                 collaboratorFilter={selectedCollaborator}
                 onClearCollaboratorFilter={() => setSelectedCollaborator(null)}
@@ -666,6 +792,7 @@ const AppContent: React.FC = () => {
 
             {activeSection === 'shared-with-me' && user && (
               <VaultPanel
+                key={`shared-with-${sessionEpoch}-${user.id}`}
                 externalSearchQuery={searchQuery}
                 collaboratorFilter={selectedCollaborator}
                 onClearCollaboratorFilter={() => setSelectedCollaborator(null)}
@@ -679,6 +806,7 @@ const AppContent: React.FC = () => {
 
             {activeSection === 'shared-by-me' && user && (
               <VaultPanel
+                key={`shared-by-${sessionEpoch}-${user.id}`}
                 externalSearchQuery={searchQuery}
                 collaboratorFilter={selectedCollaborator}
                 onClearCollaboratorFilter={() => setSelectedCollaborator(null)}

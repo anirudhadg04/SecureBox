@@ -51,8 +51,10 @@ export interface SharedByMeDocumentItem {
   file_count: number;
 }
 
-class ApiService {
+export class ApiService {
   private csrfToken: string | null = null;
+  private abortController: AbortController = new AbortController();
+  private onUnauthorizedCallback: (() => void) | null = null;
 
   setCsrfToken(token: string | null): void {
     this.csrfToken = token;
@@ -60,6 +62,15 @@ class ApiService {
 
   getCsrfToken(): string | null {
     return this.csrfToken;
+  }
+
+  onUnauthorized(cb: () => void): void {
+    this.onUnauthorizedCallback = cb;
+  }
+
+  cancelPendingRequests(): void {
+    this.abortController.abort();
+    this.abortController = new AbortController();
   }
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -71,10 +82,33 @@ class ApiService {
       headers.set('Content-Type', 'application/json');
     }
 
-    const response = await fetch(endpoint, {
-      ...options,
-      headers,
-    });
+    const signal = options.signal || this.abortController.signal;
+
+    let response: globalThis.Response;
+    try {
+      response = await fetch(endpoint, {
+        credentials: options.credentials || 'include',
+        ...options,
+        headers,
+        signal,
+      });
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new Error('Request cancelled');
+      }
+      throw err;
+    }
+
+    if (
+      response.status === 401 &&
+      !endpoint.includes('/api/auth/login') &&
+      !endpoint.includes('/api/auth/register') &&
+      !endpoint.includes('/api/auth/me')
+    ) {
+      if (this.onUnauthorizedCallback) {
+        this.onUnauthorizedCallback();
+      }
+    }
 
     if (!response.ok) {
       let errorMessage = `Request failed (${response.status})`;
@@ -115,8 +149,12 @@ class ApiService {
   }
 
   async logout(): Promise<void> {
-    await this.request('/api/auth/logout', { method: 'POST' });
-    this.csrfToken = null;
+    try {
+      await this.request('/api/auth/logout', { method: 'POST' });
+    } finally {
+      this.csrfToken = null;
+      this.cancelPendingRequests();
+    }
   }
 
   async getMe(): Promise<{ user: User | null; csrfToken?: string }> {

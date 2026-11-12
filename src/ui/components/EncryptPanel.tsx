@@ -30,11 +30,12 @@ export const EncryptPanel: React.FC<EncryptPanelProps> = ({ onRequireRegister, s
 
   // Stored raw sbox bytes for saving to vault
   const [encryptedSboxBytes, setEncryptedSboxBytes] = useState<Uint8Array | null>(null);
+  const [savedDocId, setSavedDocId] = useState<string | null>(null);
   const [savedToVault, setSavedToVault] = useState<boolean>(false);
   const [savingToVault, setSavingToVault] = useState<boolean>(false);
   const [showSendKeyModal, setShowSendKeyModal] = useState<boolean>(false);
 
-  const { user } = useAuth();
+  const { user, sessionEpoch } = useAuth();
 
   // SEC-06: Revoke object URL on component unmount and when URL changes
   useEffect(() => {
@@ -44,6 +45,11 @@ export const EncryptPanel: React.FC<EncryptPanelProps> = ({ onRequireRegister, s
       }
     };
   }, [encryptedBlobUrl]);
+
+  // Teardown sensitive state immediately when sessionEpoch changes (logout, session expiry, or account switch)
+  useEffect(() => {
+    handleReset();
+  }, [sessionEpoch, user?.id]);
 
   const handleFilesSelect = (newFiles: File[]) => {
     setFiles((prev) => [...prev, ...newFiles]);
@@ -164,7 +170,7 @@ export const EncryptPanel: React.FC<EncryptPanelProps> = ({ onRequireRegister, s
       const b64 = btoa(binary);
       const sha = await computeSha256(encryptedSboxBytes);
 
-      await api.uploadDocument({
+      const uploadRes = await api.uploadDocument({
         name: downloadFilename.replace(/\.sbox$/i, ''),
         ciphertextBase64: b64,
         plaintextSize: encryptedSummary?.totalSize || encryptedSboxBytes.length,
@@ -175,7 +181,9 @@ export const EncryptPanel: React.FC<EncryptPanelProps> = ({ onRequireRegister, s
         wrappedKeyOwner: keyHex,
       });
 
+      setSavedDocId(uploadRes.id);
       setSavedToVault(true);
+      window.dispatchEvent(new CustomEvent('securebox:shares-updated'));
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to save to vault.');
     } finally {
@@ -184,6 +192,9 @@ export const EncryptPanel: React.FC<EncryptPanelProps> = ({ onRequireRegister, s
   };
 
   const handleReset = () => {
+    if (encryptedBlobUrl) {
+      URL.revokeObjectURL(encryptedBlobUrl);
+    }
     setFiles([]);
     setArchiveName('securebox-archive');
     setStatus('idle');
@@ -195,8 +206,10 @@ export const EncryptPanel: React.FC<EncryptPanelProps> = ({ onRequireRegister, s
     setCopiedKey(false);
     setEncryptedSummary(null);
     setEncryptedSboxBytes(null);
+    setSavedDocId(null);
     setSavedToVault(false);
     setSavingToVault(false);
+    setShowSendKeyModal(false);
   };
 
   return (
@@ -439,6 +452,8 @@ export const EncryptPanel: React.FC<EncryptPanelProps> = ({ onRequireRegister, s
                 className="btn btn-secondary"
                 onClick={handleCopyKey}
                 aria-label="Copy key to clipboard"
+                title="Copy key to clipboard"
+                style={{ minWidth: '110px', whiteSpace: 'nowrap', flexShrink: 0 }}
               >
                 {copiedKey ? <Check size={18} aria-hidden="true" /> : <Copy size={18} aria-hidden="true" />}
                 <span>{copiedKey ? 'Copied' : 'Copy'}</span>
@@ -455,9 +470,11 @@ export const EncryptPanel: React.FC<EncryptPanelProps> = ({ onRequireRegister, s
                   }
                 }}
                 aria-label="Send decryption key to username collaborator"
+                title="Send decryption key to collaborator"
+                style={{ minWidth: '110px', whiteSpace: 'nowrap', flexShrink: 0 }}
               >
-                <Send size={16} aria-hidden="true" />
-                <span>Send Decryption Key</span>
+                <Send size={18} aria-hidden="true" />
+                <span>Send Key</span>
               </button>
             </div>
             <p className="form-help">
@@ -492,7 +509,19 @@ export const EncryptPanel: React.FC<EncryptPanelProps> = ({ onRequireRegister, s
         <SendDecryptionKeyModal
           documentName={downloadFilename.replace(/\.sbox$/i, '') || 'Document'}
           keyHex={keyHex}
+          docId={savedDocId}
+          encryptedSboxBytes={encryptedSboxBytes}
+          plaintextSize={encryptedSummary?.totalSize || encryptedSboxBytes?.length || 0}
+          formatVersion={files.length > 1 ? 2 : 1}
+          fileCount={encryptedSummary?.fileCount || 1}
+          onDocSavedToVault={(id) => {
+            setSavedDocId(id);
+            setSavedToVault(true);
+          }}
           onClose={() => setShowSendKeyModal(false)}
+          onShareCreated={() => {
+            window.dispatchEvent(new CustomEvent('securebox:shares-updated'));
+          }}
         />
       )}
     </div>

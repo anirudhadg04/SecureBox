@@ -4,6 +4,7 @@ import { decryptAnyDocument, DecryptAnyResult } from '../../core/crypto/service'
 import { parseKeyFromInput } from '../../core/crypto/keyUtils';
 import { FileDropzone, formatFileSize } from './common/FileDropzone';
 import { Banner } from './common/Banner';
+import { useAuth } from '../context/AuthContext';
 
 interface DecryptPanelProps {
   searchFilter?: string;
@@ -19,6 +20,7 @@ export const DecryptPanel: React.FC<DecryptPanelProps> = ({ searchFilter = '' })
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
 
   const keyFileInputRef = useRef<HTMLInputElement>(null);
+  const { user, sessionEpoch } = useAuth();
 
   // SEC-06: Revoke object URL on component unmount
   useEffect(() => {
@@ -28,6 +30,11 @@ export const DecryptPanel: React.FC<DecryptPanelProps> = ({ searchFilter = '' })
       }
     };
   }, [downloadUrl]);
+
+  // Teardown sensitive state immediately when sessionEpoch changes (logout, session expiry, or account switch)
+  useEffect(() => {
+    handleReset();
+  }, [sessionEpoch, user?.id]);
 
   const handleKeyFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -72,6 +79,9 @@ export const DecryptPanel: React.FC<DecryptPanelProps> = ({ searchFilter = '' })
   };
 
   const handleReset = () => {
+    if (downloadUrl) {
+      URL.revokeObjectURL(downloadUrl);
+    }
     setFile(null);
     setKeyInput('');
     setStatus('idle');

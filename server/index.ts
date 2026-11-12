@@ -37,6 +37,14 @@ export function createApp(): express.Express {
   // Session & Auth middleware
   app.use(sessionMiddleware);
 
+  // Prevent caching of sensitive API responses and auth state
+  app.use('/api', (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    next();
+  });
+
   // Mount API routers
   app.use('/api/auth', authRouter);
   app.use('/api/documents', documentsRouter);
@@ -55,6 +63,14 @@ export function createApp(): express.Express {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+
+  // Safe global error handler (ensures structured JSON without leaking stack traces or internal DB errors)
+  app.use((err: any, _req: Request, res: Response, _next: express.NextFunction) => {
+    const statusCode = typeof err?.status === 'number' && err.status >= 400 && err.status < 600 ? err.status : 500;
+    res.status(statusCode).json({
+      error: err?.expose && err?.message ? err.message : 'Internal server error. Please try again later.',
+    });
+  });
 
   return app;
 }

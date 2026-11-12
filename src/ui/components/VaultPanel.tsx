@@ -10,6 +10,9 @@ import {
   FolderArchive,
   ArrowUpDown,
   Lock,
+  Unlock,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { api, VaultDocument, SharedDocumentItem, SharedByMeDocumentItem } from '../../services/api';
 import { formatFileSize } from '../components/common/FileDropzone';
@@ -17,7 +20,8 @@ import { Banner } from '../components/common/Banner';
 import { ShareModal } from './ShareModal';
 import { useAuth } from '../context/AuthContext';
 import { unwrapKeyAsRecipient } from '../../core/crypto/sharingKeyUtils';
-import { bytesToHex } from '../../core/crypto/keyUtils';
+import { bytesToHex, parseKeyFromInput } from '../../core/crypto/keyUtils';
+import { decryptAnyDocument } from '../../core/crypto/service';
 
 export interface VaultPanelProps {
   externalSearchQuery?: string;
@@ -58,10 +62,21 @@ export const VaultPanel: React.FC<VaultPanelProps> = ({
   // Unwrapped key helper state for shared items
   const [unwrappedKeys, setUnwrappedKeys] = useState<Record<string, string>>({});
   const [unwrappingShareId, setUnwrappingShareId] = useState<string | null>(null);
+  const [copiedKeyShareId, setCopiedKeyShareId] = useState<string | null>(null);
+  const [decryptingShareId, setDecryptingShareId] = useState<string | null>(null);
+  const [revokingShareId, setRevokingShareId] = useState<string | null>(null);
 
-  const { user, sharingPrivateKey } = useAuth();
+  const { user, sharingPrivateKey, sessionEpoch, ensureSharingKeypair } = useAuth();
 
   const loadData = async () => {
+    if (!user) {
+      setDocuments([]);
+      setSharedWithMe([]);
+      setSharedByMe([]);
+      setUnwrappedKeys({});
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -76,6 +91,9 @@ export const VaultPanel: React.FC<VaultPanelProps> = ({
       setSharedWithMe(sharedWithRes.shares);
       setSharedByMe(sharedByRes.shares);
     } catch (err) {
+      if (err instanceof Error && err.message === 'Request cancelled') {
+        return;
+      }
       setError(err instanceof Error ? err.message : 'Failed to load vault items.');
     } finally {
       setLoading(false);
@@ -83,8 +101,32 @@ export const VaultPanel: React.FC<VaultPanelProps> = ({
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (!user) {
+      setDocuments([]);
+      setSharedWithMe([]);
+      setSharedByMe([]);
+      setUnwrappedKeys({});
+      setSharingDoc(null);
+    } else {
+      loadData();
+    }
+    return () => {
+      // Clear sensitive memory on unmount
+      setDocuments([]);
+      setSharedWithMe([]);
+      setSharedByMe([]);
+      setUnwrappedKeys({});
+      setSharingDoc(null);
+    };
+  }, [user?.id, sessionEpoch]);
+
+  useEffect(() => {
+    const handleSharesUpdated = () => {
+      if (user) loadData();
+    };
+    window.addEventListener('securebox:shares-updated', handleSharesUpdated);
+    return () => window.removeEventListener('securebox:shares-updated', handleSharesUpdated);
+  }, [user?.id]);
 
   const handleDelete = async (doc: VaultDocument) => {
     if (!window.confirm(`Permanently delete "${doc.name}" from your vault?`)) return;
@@ -112,26 +154,110 @@ export const VaultPanel: React.FC<VaultPanelProps> = ({
     }
   };
 
-  const handleUnwrapSharedKey = async (share: SharedDocumentItem) => {
-    if (!sharingPrivateKey || !user) {
-      alert('Sharing private key not loaded for this session.');
-      return;
+  const handleUnwrapSharedKey = async (share: SharedDocumentItem): Promise<string | null> => {
+    let privKey = sharingPrivateKey;
+    if (!privKey && user) {
+      privKey = await ensureSharingKeypair();
+    }
+    if (!privKey || !user) {
+      setError('Sharing private key not loaded for this session. Please check your account keypair settings.');
+      return null;
     }
     setUnwrappingShareId(share.share_id);
+    setError(null);
     try {
       const contextInfo = `doc:${share.document_id}:recipient:${user.id}:v1`;
       const unwrappedBytes = await unwrapKeyAsRecipient(
         share.wrapped_key_recipient,
         share.ephemeralPublicKeyJwk,
-        sharingPrivateKey,
+        privKey,
         contextInfo
       );
       const hex = bytesToHex(unwrappedBytes);
       setUnwrappedKeys((prev) => ({ ...prev, [share.share_id]: hex }));
+      return hex;
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to unwrap shared key.');
+      setError(err instanceof Error ? err.message : 'Failed to unwrap shared key.');
+      return null;
     } finally {
       setUnwrappingShareId(null);
+    }
+  };
+
+  const handleCopySharedKey = async (shareId: string, hex: string) => {
+    try {
+      await navigator.clipboard.writeText(hex);
+      setCopiedKeyShareId(shareId);
+      setTimeout(() => setCopiedKeyShareId(null), 2500);
+    } catch {
+      setCopiedKeyShareId(null);
+    }
+  };
+
+  const handleDecryptSharedDoc = async (share: SharedDocumentItem) => {
+    setDecryptingShareId(share.share_id);
+    setError(null);
+    try {
+      let hex = unwrappedKeys[share.share_id];
+      if (!hex) {
+        let privKey = sharingPrivateKey;
+        if (!privKey && user) {
+          privKey = await ensureSharingKeypair();
+        }
+        if (!privKey || !user) {
+          throw new Error('Your sharing private key is not loaded for this session.');
+        }
+        const contextInfo = `doc:${share.document_id}:recipient:${user.id}:v1`;
+        const unwrappedBytes = await unwrapKeyAsRecipient(
+          share.wrapped_key_recipient,
+          share.ephemeralPublicKeyJwk,
+          privKey,
+          contextInfo
+        );
+        hex = bytesToHex(unwrappedBytes);
+        setUnwrappedKeys((prev) => ({ ...prev, [share.share_id]: hex }));
+      }
+
+      let blob: Blob;
+      try {
+        blob = await api.downloadDocumentBlob(share.document_id);
+      } catch {
+        throw new Error('Document ciphertext artifact is missing on server or access was revoked.');
+      }
+
+      const arrayBuffer = await blob.arrayBuffer();
+      const sboxBytes = new Uint8Array(arrayBuffer);
+      const cryptoKey = await parseKeyFromInput(hex);
+
+      const result = await decryptAnyDocument(sboxBytes, cryptoKey);
+
+      const url = URL.createObjectURL(result.downloadBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = result.downloadFilename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Decryption failed: integrity verification error.');
+    } finally {
+      setDecryptingShareId(null);
+    }
+  };
+
+  const handleRevokeShare = async (share: SharedByMeDocumentItem) => {
+    if (!window.confirm(`Revoke access to "${share.document_name}" for @${share.recipient_username}?`)) return;
+    setRevokingShareId(share.share_id);
+    setError(null);
+    try {
+      await api.revokeShare(share.share_id);
+      await loadData();
+      window.dispatchEvent(new CustomEvent('securebox:shares-updated'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to revoke document share.');
+    } finally {
+      setRevokingShareId(null);
     }
   };
 
@@ -509,9 +635,20 @@ export const VaultPanel: React.FC<VaultPanelProps> = ({
                         </td>
                         <td style={{ padding: '12px' }}>
                           {keyHex ? (
-                            <code style={{ fontSize: '0.75rem', background: 'var(--bg-subtle)', padding: '2px 6px', borderRadius: '4px' }}>
-                              {keyHex.slice(0, 8)}...{keyHex.slice(-8)}
-                            </code>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <code style={{ fontSize: '0.75rem', background: 'var(--bg-subtle)', padding: '2px 6px', borderRadius: '4px' }}>
+                                {keyHex.slice(0, 8)}...{keyHex.slice(-8)}
+                              </code>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => handleCopySharedKey(item.share_id, keyHex)}
+                                title="Copy 256-bit decryption key"
+                                style={{ padding: '2px 6px' }}
+                              >
+                                {copiedKeyShareId === item.share_id ? <Check size={12} color="#16a34a" /> : <Copy size={12} />}
+                              </button>
+                            </div>
                           ) : (
                             <button
                               type="button"
@@ -525,14 +662,26 @@ export const VaultPanel: React.FC<VaultPanelProps> = ({
                           )}
                         </td>
                         <td style={{ padding: '12px', textAlign: 'right' }}>
-                          <button
-                            type="button"
-                            className="btn btn-primary btn-sm"
-                            onClick={() => handleDownload(item.document_id, item.document_name)}
-                          >
-                            <Download size={14} aria-hidden="true" />
-                            <span>Download .sbox</span>
-                          </button>
+                          <div style={{ display: 'inline-flex', gap: '6px' }}>
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              onClick={() => handleDecryptSharedDoc(item)}
+                              disabled={decryptingShareId === item.share_id}
+                              title="Decrypt and save document locally"
+                            >
+                              <Unlock size={14} aria-hidden="true" />
+                              <span>{decryptingShareId === item.share_id ? 'Decrypting...' : 'Decrypt'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => handleDownload(item.document_id, item.document_name)}
+                              title="Download encrypted .sbox file"
+                            >
+                              <Download size={14} aria-hidden="true" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -565,6 +714,7 @@ export const VaultPanel: React.FC<VaultPanelProps> = ({
                     <th style={{ padding: '10px 12px' }}>Status</th>
                     <th style={{ padding: '10px 12px' }}>Permission</th>
                     <th style={{ padding: '10px 12px' }}>Date</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -582,6 +732,20 @@ export const VaultPanel: React.FC<VaultPanelProps> = ({
                       </td>
                       <td style={{ padding: '12px', color: 'var(--text-secondary)' }}>
                         {new Date(item.shared_at).toLocaleDateString()}
+                      </td>
+                      <td style={{ padding: '12px', textAlign: 'right' }}>
+                        {item.status === 'active' && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => handleRevokeShare(item)}
+                            disabled={revokingShareId === item.share_id}
+                            title="Revoke recipient access"
+                            style={{ color: 'var(--state-error-text)' }}
+                          >
+                            <span>{revokingShareId === item.share_id ? 'Revoking...' : 'Revoke'}</span>
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

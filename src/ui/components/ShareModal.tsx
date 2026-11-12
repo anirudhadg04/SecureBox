@@ -70,6 +70,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ document: doc, onClose, 
 
       setSuccess(true);
       onShareCreated();
+      window.dispatchEvent(new CustomEvent('securebox:shares-updated'));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to wrap and send decryption key.');
     } finally {

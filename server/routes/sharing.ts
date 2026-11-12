@@ -149,7 +149,13 @@ sharingRouter.post('/share', requireAuth, requireCsrf, (req: AuthenticatedReques
   const shareId = generateUuid();
   const now = Date.now();
 
-  // Insert or reactivate share
+  // Revoke any previous active share for this document and recipient
+  db.prepare(`
+    UPDATE document_shares SET status = 'revoked', revoked_at = ?
+    WHERE document_id = ? AND recipient_id = ? AND status = 'active'
+  `).run(now, documentId, recipient.id);
+
+  // Insert share
   db.prepare(`
     INSERT INTO document_shares (
       id, document_id, sender_id, recipient_id, wrapped_key_recipient,
